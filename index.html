@@ -74,6 +74,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); ou
 .scanpanel { display: flex; flex-direction: column; gap: 8px; border: 1.5px dashed var(--ink); border-radius: 4px; padding: 12px; }
 .scanprompt { font-weight: 600; margin: 0; }
 #reader { width: 100%; border-radius: 4px; overflow: hidden; }
+.readerwrap { overflow: hidden; border-radius: 4px; }
 #reader video { display: block; width: 100%; }
 .msg { margin: 0; padding: 10px 12px; border-radius: 4px; font-weight: 500; border-left: 5px solid var(--muted); background: var(--surface); }
 .msg.ok { background: var(--ok-bg); border-left-color: var(--load); }
@@ -103,7 +104,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
   <div class="scanpanel" id="scanpanel" hidden>
     <p class="scanprompt" id="scanprompt"></p>
     <p class="msg err" id="scanmsg" role="status" aria-live="polite" hidden></p>
-    <div id="reader"></div>
+    <div class="readerwrap" id="readerwrap"><div id="reader"></div></div>
     <button type="button" class="primary" id="photo-btn" hidden>Take photo of barcode</button>
     <input type="file" id="photo-input" accept="image/*" capture="environment" hidden>
     <button type="button" id="scan-cancel">Cancel scanning</button>
@@ -425,12 +426,22 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     updateButtons();
     if (queue.length) prompt_(); else stopScan();
   }
+  // Show only the middle half of the camera picture, so the window is a wide rectangle.
+  function fitReader() {
+    var wrap = $("readerwrap"), r = $("reader");
+    if (!live) { wrap.style.height = ""; r.style.transform = ""; return; }
+    var h = r.offsetHeight;
+    if (!h) return;
+    wrap.style.height = Math.round(h / 2) + "px";
+    r.style.transform = "translateY(-" + Math.round(h / 4) + "px)";
+  }
   async function stopScan() {
     queue = [];
     $("scanpanel").hidden = true;
     if (live) {
       live = false;
       try { await qr.stop(); qr.clear(); } catch (e) {}
+      fitReader();
     }
   }
   async function startScan(targets) {
@@ -445,7 +456,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     if (photoMode) return;
     try {
       await qr.start({ facingMode: "environment" },
-        { fps: 10, qrbox: function (w, h) { return { width: Math.floor(w * 0.85), height: Math.floor(h * 0.55) }; } },
+        { fps: 10, qrbox: function (w, h) { return { width: Math.max(50, Math.floor(w * 0.9)), height: Math.max(50, Math.floor(h * 0.4)) }; } },
         function (text) {
           var now = Date.now();
           if (now < pauseUntil) return;
@@ -455,6 +466,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
         },
         function () {});
       live = true;
+      fitReader(); setTimeout(fitReader, 400); setTimeout(fitReader, 1200);
       if (!queue.length) stopScan();
     } catch (e) {
       photoMode = true;   // live camera refused here: fall back to photographing the label
