@@ -1,0 +1,438 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>body{margin:0}[hidden]{display:none!important}</style></head><body><title>Stock Scanner</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: one phone-width column, worked top to bottom: scan two codes, choose the action, look up a part, review and export the list. */
+:root {
+  --bg: #e7ecef;
+  --surface: #f9fbfc;
+  --ink: #13212c;
+  --muted: #52636f;
+  --line: #c3cdd5;
+  --accent: #f2b705;
+  --on-accent: #1c1600;
+  --load: #1c7548;
+  --unload: #b2431d;
+  --on-action: #ffffff;
+  --ok-bg: #d9efe2;
+  --err-bg: #f7dcd2;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  --font-data: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f171d; --surface: #18242d; --ink: #e7eef3; --muted: #94a5b2; --line: #2d3d49;
+    --accent: #f2b705; --on-accent: #1c1600; --load: #2a9460; --unload: #cf5a30; --on-action: #ffffff;
+    --ok-bg: #173a2a; --err-bg: #47231a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f171d; --surface: #18242d; --ink: #e7eef3; --muted: #94a5b2; --line: #2d3d49;
+  --accent: #f2b705; --on-accent: #1c1600; --load: #2a9460; --unload: #cf5a30; --on-action: #ffffff;
+  --ok-bg: #173a2a; --err-bg: #47231a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.45;
+  padding-inline: 16px; padding-block: 20px 40px;
+}
+.app { max-width: 480px; margin-inline: auto; display: flex; flex-direction: column; gap: 28px; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  border-bottom: 3px solid var(--ink); padding-bottom: 8px; }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: 34px; line-height: 1; margin: 0;
+  text-transform: uppercase; letter-spacing: 0.02em; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 22px; line-height: 1.1; margin: 0;
+  text-transform: uppercase; letter-spacing: 0.04em; text-wrap: balance; }
+.count { font-family: var(--font-data); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+section { display: flex; flex-direction: column; gap: 12px; }
+.hint { color: var(--muted); font-size: 14px; margin: 0; }
+label.lbl { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.row { display: flex; gap: 8px; }
+.row > input { flex: 1; min-width: 0; }
+input[type="text"] {
+  font-family: var(--font-data); font-size: 18px; font-weight: 500; color: var(--ink);
+  background: var(--surface); border: 1.5px solid var(--line); border-radius: 4px;
+  padding: 12px; min-height: 50px; width: 100%;
+}
+input.pos { background: var(--accent); color: var(--on-accent); border-color: var(--on-accent); font-weight: 700; }
+input.pos::placeholder { color: var(--on-accent); opacity: 0.55; }
+input::placeholder { color: var(--muted); opacity: 0.8; font-weight: 500; }
+button {
+  font-family: var(--font-display); font-weight: 600; font-size: 19px; letter-spacing: 0.05em; text-transform: uppercase;
+  min-height: 50px; padding: 10px 16px; border-radius: 4px; cursor: pointer;
+  border: 1.5px solid var(--ink); background: var(--surface); color: var(--ink);
+}
+button.primary { background: var(--ink); color: var(--bg); }
+button.load { background: var(--load); border-color: var(--load); color: var(--on-action); }
+button.unload { background: var(--unload); border-color: var(--unload); color: var(--on-action); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.actions button { min-height: 68px; font-size: 21px; line-height: 1.1; }
+.scanpanel { display: flex; flex-direction: column; gap: 8px; border: 1.5px dashed var(--ink); border-radius: 4px; padding: 12px; }
+.scanprompt { font-weight: 600; margin: 0; }
+#reader { width: 100%; border-radius: 4px; overflow: hidden; }
+#reader video { display: block; width: 100%; }
+.msg { margin: 0; padding: 10px 12px; border-radius: 4px; font-weight: 500; border-left: 5px solid var(--muted); background: var(--surface); }
+.msg.ok { background: var(--ok-bg); border-left-color: var(--load); }
+.msg.err { background: var(--err-bg); border-left-color: var(--unload); }
+.tag { display: inline-block; font-family: var(--font-data); font-weight: 700; font-size: 20px;
+  background: var(--accent); color: var(--on-accent); border: 1.5px solid var(--on-accent); border-radius: 3px; padding: 4px 10px; }
+.tag small { font-weight: 500; font-size: 13px; }
+.found { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tablewrap { overflow-x: auto; border: 1.5px solid var(--line); border-radius: 4px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-family: var(--font-data); font-size: 14px; }
+th { font-family: var(--font-body); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted); text-align: left; }
+th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+.empty { padding: 18px 12px; color: var(--muted); font-size: 14px; margin: 0; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="app">
+  <header>
+    <h1>Stock Scanner</h1>
+    <span class="count" id="count">loading…</span>
+  </header>
+
+  <section aria-labelledby="h-scan">
+    <h2 id="h-scan">Scan</h2>
+    <div class="field">
+      <label class="lbl" for="position">Stock position</label>
+      <div class="row">
+        <input class="pos" type="text" id="position" placeholder="e.g. A-03-2" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button type="button" id="scan-position">Scan</button>
+      </div>
+    </div>
+    <div class="field">
+      <label class="lbl" for="part">Part number (letters and digits, max 15)</label>
+      <div class="row">
+        <input type="text" id="part" maxlength="15" placeholder="e.g. AB12345XYZ" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button type="button" id="scan-part">Scan</button>
+      </div>
+    </div>
+    <button type="button" class="primary" id="scan-both">Scan both barcodes</button>
+
+    <div class="scanpanel" id="scanpanel" hidden>
+      <p class="scanprompt" id="scanprompt"></p>
+      <p class="msg err" id="scanmsg" role="status" aria-live="polite" hidden></p>
+      <div id="reader"></div>
+      <button type="button" class="primary" id="photo-btn" hidden>Take photo of barcode</button>
+      <input type="file" id="photo-input" accept="image/*" capture="environment" hidden>
+      <button type="button" id="scan-cancel">Cancel scanning</button>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="load" id="btn-load" disabled>Load to stock</button>
+      <button type="button" class="unload" id="btn-unload" disabled>Unload from stock</button>
+    </div>
+    <p class="msg" id="msg" role="status" aria-live="polite" hidden></p>
+  </section>
+
+  <section aria-labelledby="h-find">
+    <h2 id="h-find">Show position</h2>
+    <div class="field" id="find-field">
+      <label class="lbl" for="find">Part number to find</label>
+      <div class="row">
+        <input type="text" id="find" maxlength="15" placeholder="Type or scan a part number" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button type="button" id="scan-find">Scan</button>
+      </div>
+    </div>
+    <div id="find-result" aria-live="polite"><p class="hint">Type or scan a part number to see where it is stored.</p></div>
+  </section>
+
+  <section aria-labelledby="h-list">
+    <h2 id="h-list">Stock list</h2>
+    <div class="tablewrap" id="list"><p class="empty">Loading the stock list…</p></div>
+    <button type="button" class="primary" id="export" disabled>Export Excel file</button>
+    <p class="hint" id="export-hint">Creates stock.xlsx with the part number in column A and the position in column B. Send it by choosing your email app in the share sheet, or attach the saved file to an email.</p>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var LOCAL_KEY = "stock-scanner-rows";
+  var rows = [];            // {id, part, position, ts}
+  var mode = "pending";     // "pending" | "db" | "local"
+  var col = null;           // db collection
+  var downloads = null;
+  var busy = false;
+
+  var PART_RE = /^[A-Za-z0-9]{1,15}$/;
+  var PART_RULE = "A part number has 1 to 15 letters and digits, with no spaces or other characters.";
+  function clean(el) { var v = el.value.replace(/[^A-Za-z0-9]/g, "").slice(0, 15); if (v !== el.value) el.value = v; }
+  function norm(s) { return String(s == null ? "" : s).trim().toUpperCase(); }
+  function esc(s) { var d = document.createElement("span"); d.textContent = s; return d.innerHTML; }
+
+  function say(text, kind) {
+    var m = $("msg");
+    m.textContent = text;
+    m.className = "msg" + (kind ? " " + kind : "");
+    m.hidden = !text;
+  }
+
+  /* ---------- storage ---------- */
+  function loadLocal() {
+    try { var v = JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]"); return Array.isArray(v) ? v : []; }
+    catch (e) { return []; }
+  }
+  function saveLocal() {
+    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(rows)); return true; } catch (e) { return false; }
+  }
+  function useLocal() {
+    mode = "local";
+    rows = loadLocal();
+    render();
+  }
+  function useDb(db) {
+    mode = "db";
+    col = db.collection("stock");
+    col.limit(1000).onSnapshot(function (snap) {
+      rows = snap.docs.map(function (d) {
+        var x = d.data() || {};
+        return { id: d.id, part: String(x.part || ""), position: String(x.position || ""), ts: Number(x.ts) || 0 };
+      });
+      render();
+    }, function () {
+      say("The shared stock list stopped updating. Reload the page.", "err");
+    });
+  }
+  async function addRow(part, position) {
+    var row = { part: part, position: position, ts: Date.now() };
+    if (mode === "db") { await col.add(row); return; }
+    row.id = "r" + row.ts + Math.random().toString(36).slice(2, 8);
+    rows.push(row);
+    if (!saveLocal()) { rows.pop(); throw new Error("storage"); }
+    render();
+  }
+  async function removeRow(row) {
+    if (mode === "db") { await col.doc(row.id).delete(); return; }
+    var before = rows;
+    rows = rows.filter(function (r) { return r.id !== row.id; });
+    if (!saveLocal()) { rows = before; throw new Error("storage"); }
+    render();
+  }
+
+  /* ---------- actions ---------- */
+  function positionsOf(part) {
+    var p = norm(part), map = {}, order = [];
+    rows.forEach(function (r) {
+      if (norm(r.part) !== p) return;
+      var k = norm(r.position);
+      if (!map[k]) { map[k] = { position: r.position, n: 0 }; order.push(k); }
+      map[k].n++;
+    });
+    return order.map(function (k) { return map[k]; });
+  }
+
+  async function act(kind) {
+    var part = $("part").value.trim(), position = $("position").value.trim();
+    if (!part || !position || busy || mode === "pending") return;
+    if (!PART_RE.test(part)) { say(PART_RULE, "err"); return; }
+    busy = true; updateButtons();
+    try {
+      if (kind === "load") {
+        await addRow(part, position);
+        say("Loaded " + part + " to " + position + ".", "ok");
+      } else {
+        var match = rows.filter(function (r) { return norm(r.part) === norm(part) && norm(r.position) === norm(position); })
+          .sort(function (a, b) { return b.ts - a.ts; })[0];
+        if (!match) {
+          var where = positionsOf(part).map(function (x) { return x.position; });
+          say("Nothing was deleted. " + part + " is not at " + position + "." +
+            (where.length ? " It is at " + where.join(", ") + "." : " It is not in stock."), "err");
+          return;
+        }
+        await removeRow(match);
+        say("Unloaded " + part + " from " + position + ".", "ok");
+      }
+      $("part").value = ""; $("position").value = "";
+    } catch (e) {
+      say(e && e.code === "invalid_argument"
+        ? "You can view this stock list but not change it. Ask the owner for Contributor access."
+        : "The change was not saved. Try again.", "err");
+    } finally {
+      busy = false; updateButtons();
+    }
+  }
+
+  /* ---------- rendering ---------- */
+  function updateButtons() {
+    var ready = !!$("part").value.trim() && !!$("position").value.trim() && !busy && mode !== "pending";
+    $("btn-load").disabled = !ready;
+    $("btn-unload").disabled = !ready;
+    $("export").disabled = mode === "pending" || rows.length === 0;
+  }
+  function renderFind() {
+    var q = $("find").value.trim(), out = $("find-result");
+    if (!q) { out.innerHTML = '<p class="hint">Type or scan a part number to see where it is stored.</p>'; return; }
+    if (mode === "pending") { out.innerHTML = '<p class="hint">Loading the stock list…</p>'; return; }
+    var found = positionsOf(q);
+    if (!found.length) { out.innerHTML = '<p class="msg err">' + esc(q) + " is not in stock.</p>"; return; }
+    out.innerHTML = '<div class="found">' + found.map(function (x) {
+      return '<span class="tag">' + esc(x.position) + (x.n > 1 ? " <small>× " + x.n + "</small>" : "") + "</span>";
+    }).join("") + "</div>";
+  }
+  function render() {
+    var n = rows.length;
+    $("count").textContent = n + (n === 1 ? " row" : " rows") + (mode === "local" ? " · this device" : "");
+    var list = $("list");
+    if (!n) {
+      list.innerHTML = '<p class="empty">No parts in stock yet. Scan a position and a part number, then tap Load to stock.</p>';
+    } else {
+      var sorted = rows.slice().sort(function (a, b) { return b.ts - a.ts; });
+      var shown = sorted.slice(0, 200);
+      list.innerHTML = "<table><thead><tr><th>Part number</th><th>Position</th></tr></thead><tbody>" +
+        shown.map(function (r) { return "<tr><td>" + esc(r.part) + "</td><td>" + esc(r.position) + "</td></tr>"; }).join("") +
+        "</tbody></table>" +
+        (n > shown.length ? '<p class="empty">Showing the newest 200 of ' + n + " rows. The Excel file contains all of them.</p>" : "");
+    }
+    renderFind();
+    updateButtons();
+  }
+
+  /* ---------- Excel export ---------- */
+  async function exportExcel() {
+    if (!window.XLSX) { say("The Excel library did not load. Check the connection and reload.", "err"); return; }
+    var data = [["Part number", "Position"]].concat(rows.slice().sort(function (a, b) { return a.ts - b.ts; })
+      .map(function (r) { return [r.part, r.position]; }));
+    var d = new Date(), two = function (n) { return (n < 10 ? "0" : "") + n; };
+    data.push(["Exported", two(d.getDate()) + "." + two(d.getMonth() + 1) + "." + d.getFullYear() + " " +
+      two(d.getHours()) + ":" + two(d.getMinutes()) + ":" + two(d.getSeconds())]);
+    var ws = XLSX.utils.aoa_to_sheet(data);
+    ws["!cols"] = [{ wch: 24 }, { wch: 22 }];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Stock");
+    var type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    var blob = new Blob([XLSX.write(wb, { bookType: "xlsx", type: "array" })], { type: type });
+    var name = "stock-" + new Date().toISOString().slice(0, 10) + ".xlsx";
+    try {
+      if (downloads) {
+        await downloads.save({ filename: name, data: blob });
+        say("Saved " + name + ". Attach it to an email to send it.", "ok");
+        return;
+      }
+      var file = new File([blob], name, { type: type });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "Stock list" });
+        return;
+      }
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      say("Saved " + name + ". Attach it to an email to send it.", "ok");
+    } catch (e) {
+      if (e && (e.code === "declined" || e.name === "AbortError")) return;
+      say("The file could not be saved here.", "err");
+    }
+  }
+
+  /* ---------- barcode scanning ---------- */
+  var qr = null, live = false, photoMode = false, queue = [], lastText = "", lastAt = 0;
+  var NAMES = { position: "stock position", part: "part number", find: "part number" };
+  function scanSay(text) { var m = $("scanmsg"); m.textContent = text; m.hidden = !text; }
+
+  function getQr() {
+    if (!qr && window.Html5Qrcode) {
+      qr = new Html5Qrcode("reader", { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+    }
+    return qr;
+  }
+  function prompt_() {
+    $("scanprompt").textContent = photoMode
+      ? "Take a photo of the " + NAMES[queue[0]] + " barcode."
+      : "Point the camera at the " + NAMES[queue[0]] + " barcode.";
+    $("photo-btn").hidden = !photoMode;
+    $("reader").hidden = photoMode;
+  }
+  function accept(text) {
+    if (!queue.length) return;
+    var value = String(text).trim();
+    if (queue[0] !== "position" && !PART_RE.test(value)) {
+      scanSay("Scanned \"" + value + "\" is not a valid part number. " + PART_RULE + " Scan the part barcode again.", "err");
+      return;
+    }
+    var target = queue.shift();
+    $(target).value = value;
+    scanSay("");
+    if (target === "find") renderFind(); else say("");
+    if (navigator.vibrate) { try { navigator.vibrate(60); } catch (e) {} }
+    updateButtons();
+    if (queue.length) prompt_(); else stopScan();
+  }
+  async function stopScan() {
+    queue = [];
+    $("scanpanel").hidden = true;
+    if (live) {
+      live = false;
+      try { await qr.stop(); qr.clear(); } catch (e) {}
+    }
+  }
+  async function startScan(targets) {
+    await stopScan();
+    say("");
+    if (!getQr()) { say("The scanner did not load. Type the codes instead, or reload the page.", "err"); return; }
+    queue = targets.slice();
+    scanSay("");
+    (targets[0] === "find" ? $("find-field") : $("scan-both")).after($("scanpanel"));
+    $("scanpanel").hidden = false;
+    prompt_();
+    if (photoMode) return;
+    try {
+      await qr.start({ facingMode: "environment" },
+        { fps: 10, qrbox: function (w, h) { return { width: Math.floor(w * 0.85), height: Math.floor(h * 0.55) }; } },
+        function (text) {
+          var now = Date.now();
+          if (text === lastText && now - lastAt < 2500) return;   // same label still in view
+          lastText = text; lastAt = now;
+          accept(text);
+        },
+        function () {});
+      live = true;
+      if (!queue.length) stopScan();
+    } catch (e) {
+      photoMode = true;   // live camera refused here: fall back to photographing the label
+      prompt_();
+    }
+  }
+  $("photo-btn").addEventListener("click", function () { $("photo-input").click(); });
+  $("photo-input").addEventListener("change", async function () {
+    var file = this.files && this.files[0];
+    this.value = "";
+    if (!file || !queue.length) return;
+    try {
+      var decoded = await qr.scanFile(file, false);
+      accept(decoded);
+    } catch (e) {
+      scanSay("No barcode was found in that photo. Move closer, keep the label flat and sharp, and try again.");
+    }
+  });
+
+  /* ---------- wiring ---------- */
+  $("scan-both").addEventListener("click", function () { startScan(["position", "part"]); });
+  $("scan-position").addEventListener("click", function () { startScan(["position"]); });
+  $("scan-part").addEventListener("click", function () { startScan(["part"]); });
+  $("scan-find").addEventListener("click", function () { startScan(["find"]); });
+  $("scan-cancel").addEventListener("click", stopScan);
+  $("btn-load").addEventListener("click", function () { act("load"); });
+  $("btn-unload").addEventListener("click", function () { act("unload"); });
+  $("export").addEventListener("click", exportExcel);
+  $("part").addEventListener("input", function () { clean(this); updateButtons(); });
+  $("position").addEventListener("input", updateButtons);
+  $("find").addEventListener("input", function () { clean(this); renderFind(); });
+
+  if (window.claude && typeof window.claude.use === "function") {
+    window.claude.use("downloads").then(function (d) { downloads = d; }, function () {});
+    window.claude.use("db").then(function (db) { if (db) useDb(db); else useLocal(); }, useLocal);
+  } else {
+    useLocal();
+  }
+})();
+</script>
+</body></html>
