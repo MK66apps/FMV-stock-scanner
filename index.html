@@ -51,7 +51,7 @@ label.lbl { font-size: 13px; font-weight: 600; text-transform: uppercase; letter
 .field { display: flex; flex-direction: column; gap: 4px; }
 .row { display: flex; gap: 8px; }
 .row > input { flex: 1; min-width: 0; }
-input[type="text"] {
+input[type="text"], input[type="password"] {
   font-family: var(--font-data); font-size: 18px; font-weight: 500; color: var(--ink);
   background: var(--surface); border: 1.5px solid var(--line); border-radius: 4px;
   padding: 12px; min-height: 50px; width: 100%;
@@ -88,6 +88,8 @@ th { font-family: var(--font-body); font-size: 12px; font-weight: 600; text-tran
   color: var(--muted); text-align: left; }
 th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 tr:last-child td { border-bottom: 0; }
+button.del { min-height: 36px; font-size: 15px; padding: 4px 10px; border-color: var(--unload); color: var(--unload); }
+button.del.sure { background: var(--unload); color: var(--on-action); }
 .empty { padding: 18px 12px; color: var(--muted); font-size: 14px; margin: 0; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
@@ -98,15 +100,17 @@ tr:last-child td { border-bottom: 0; }
     <span class="count" id="count">loading…</span>
   </header>
 
+  <div class="scanpanel" id="scanpanel" hidden>
+    <p class="scanprompt" id="scanprompt"></p>
+    <p class="msg err" id="scanmsg" role="status" aria-live="polite" hidden></p>
+    <div id="reader"></div>
+    <button type="button" class="primary" id="photo-btn" hidden>Take photo of barcode</button>
+    <input type="file" id="photo-input" accept="image/*" capture="environment" hidden>
+    <button type="button" id="scan-cancel">Cancel scanning</button>
+  </div>
+
   <section aria-labelledby="h-scan">
     <h2 id="h-scan">Scan</h2>
-    <div class="field">
-      <label class="lbl" for="position">Stock position</label>
-      <div class="row">
-        <input class="pos" type="text" id="position" placeholder="e.g. A-03-2" autocomplete="off" autocapitalize="characters" spellcheck="false">
-        <button type="button" id="scan-position">Scan</button>
-      </div>
-    </div>
     <div class="field">
       <label class="lbl" for="part">Part number (letters and digits, max 15)</label>
       <div class="row">
@@ -114,16 +118,15 @@ tr:last-child td { border-bottom: 0; }
         <button type="button" id="scan-part">Scan</button>
       </div>
     </div>
+    <div class="field">
+      <label class="lbl" for="position">Stock position (6 characters: 2 digits, letter, 2 digits, letter)</label>
+      <div class="row">
+        <input class="pos" type="text" id="position" maxlength="6" placeholder="e.g. 12A34B" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button type="button" id="scan-position">Scan</button>
+      </div>
+    </div>
     <button type="button" class="primary" id="scan-both">Scan both barcodes</button>
 
-    <div class="scanpanel" id="scanpanel" hidden>
-      <p class="scanprompt" id="scanprompt"></p>
-      <p class="msg err" id="scanmsg" role="status" aria-live="polite" hidden></p>
-      <div id="reader"></div>
-      <button type="button" class="primary" id="photo-btn" hidden>Take photo of barcode</button>
-      <input type="file" id="photo-input" accept="image/*" capture="environment" hidden>
-      <button type="button" id="scan-cancel">Cancel scanning</button>
-    </div>
 
     <div class="actions">
       <button type="button" class="load" id="btn-load" disabled>Load to stock</button>
@@ -149,6 +152,15 @@ tr:last-child td { border-bottom: 0; }
     <div class="tablewrap" id="list"><p class="empty">Loading the stock list…</p></div>
     <button type="button" class="primary" id="export" disabled>Export Excel file</button>
     <p class="hint" id="export-hint">Creates stock.xlsx with the part number in column A and the position in column B. Send it by choosing your email app in the share sheet, or attach the saved file to an email.</p>
+    <button type="button" id="edit-toggle">Edit records</button>
+    <div class="field" id="pw-box" hidden>
+      <label class="lbl" for="pw">Password for editing</label>
+      <div class="row">
+        <input type="password" id="pw" inputmode="numeric" maxlength="4" autocomplete="off">
+        <button type="button" class="primary" id="pw-ok">Open</button>
+      </div>
+    </div>
+    <p class="msg" id="edit-msg" role="status" aria-live="polite" hidden></p>
   </section>
 </div>
 
@@ -166,6 +178,9 @@ tr:last-child td { border-bottom: 0; }
 
   var PART_RE = /^[A-Za-z0-9]{1,15}$/;
   var PART_RULE = "A part number has 1 to 15 letters and digits, with no spaces or other characters.";
+  var POS_RE = /^[0-9]{2}[A-Za-z][0-9]{2}[A-Za-z]$/;
+  var POS_RULE = "A stock position has exactly 6 characters: 2 digits, a letter, 2 digits, a letter (for example 12A34B).";
+  function cleanPos(el) { var v = el.value.replace(/[^A-Za-z0-9]/g, "").slice(0, 6); if (v !== el.value) el.value = v; }
   function clean(el) { var v = el.value.replace(/[^A-Za-z0-9]/g, "").slice(0, 15); if (v !== el.value) el.value = v; }
   function norm(s) { return String(s == null ? "" : s).trim().toUpperCase(); }
   function esc(s) { var d = document.createElement("span"); d.textContent = s; return d.innerHTML; }
@@ -235,6 +250,7 @@ tr:last-child td { border-bottom: 0; }
     var part = $("part").value.trim(), position = $("position").value.trim();
     if (!part || !position || busy || mode === "pending") return;
     if (!PART_RE.test(part)) { say(PART_RULE, "err"); return; }
+    if (!POS_RE.test(position)) { say(POS_RULE, "err"); return; }
     busy = true; updateButtons();
     try {
       if (kind === "load") {
@@ -287,14 +303,50 @@ tr:last-child td { border-bottom: 0; }
       list.innerHTML = '<p class="empty">No parts in stock yet. Scan a position and a part number, then tap Load to stock.</p>';
     } else {
       var sorted = rows.slice().sort(function (a, b) { return b.ts - a.ts; });
-      var shown = sorted.slice(0, 200);
-      list.innerHTML = "<table><thead><tr><th>Part number</th><th>Position</th></tr></thead><tbody>" +
-        shown.map(function (r) { return "<tr><td>" + esc(r.part) + "</td><td>" + esc(r.position) + "</td></tr>"; }).join("") +
+      var shown = editMode ? sorted : sorted.slice(0, 200);
+      list.innerHTML = "<table><thead><tr><th>Part number</th><th>Position</th>" + (editMode ? "<th>Edit</th>" : "") + "</tr></thead><tbody>" +
+        shown.map(function (r) {
+          var sure = pendingDel === r.id;
+          return "<tr><td>" + esc(r.part) + "</td><td>" + esc(r.position) + "</td>" +
+            (editMode ? '<td><button type="button" class="del' + (sure ? " sure" : "") + '" data-del="' + esc(r.id) + '">' +
+              (sure ? "Confirm delete" : "Delete") + "</button></td>" : "") + "</tr>";
+        }).join("") +
         "</tbody></table>" +
         (n > shown.length ? '<p class="empty">Showing the newest 200 of ' + n + " rows. The Excel file contains all of them.</p>" : "");
     }
     renderFind();
     updateButtons();
+  }
+
+  /* ---------- editing mode (password) ---------- */
+  var EDIT_PASSWORD = "1966";
+  var editMode = false, pendingDel = null;
+  function editSay(text, kind) {
+    var m = $("edit-msg"); m.textContent = text; m.className = "msg" + (kind ? " " + kind : ""); m.hidden = !text;
+  }
+  function setEdit(on) {
+    editMode = on; pendingDel = null;
+    $("edit-toggle").textContent = on ? "Close editing" : "Edit records";
+    $("pw-box").hidden = true; $("pw").value = "";
+    editSay(on ? "Editing is open. Tap Delete on a row, then Confirm delete." : "");
+    render();
+  }
+  function tryPassword() {
+    if ($("pw").value === EDIT_PASSWORD) { setEdit(true); return; }
+    $("pw").value = "";
+    editSay("Wrong password.", "err");
+  }
+  async function deleteFromList(id) {
+    var row = rows.filter(function (r) { return r.id === id; })[0];
+    if (!row || busy) return;
+    if (pendingDel !== id) { pendingDel = id; render(); return; }
+    busy = true; pendingDel = null;
+    try {
+      await removeRow(row);
+      editSay("Deleted " + row.part + " at " + row.position + ".", "ok");
+    } catch (e) {
+      editSay("The record was not deleted. Try again.", "err");
+    } finally { busy = false; render(); }
   }
 
   /* ---------- Excel export ---------- */
@@ -334,7 +386,7 @@ tr:last-child td { border-bottom: 0; }
   }
 
   /* ---------- barcode scanning ---------- */
-  var qr = null, live = false, photoMode = false, queue = [], lastText = "", lastAt = 0;
+  var qr = null, live = false, photoMode = false, queue = [], lastText = "", lastAt = 0, pauseUntil = 0;
   var NAMES = { position: "stock position", part: "part number", find: "part number" };
   function scanSay(text) { var m = $("scanmsg"); m.textContent = text; m.hidden = !text; }
 
@@ -354,6 +406,13 @@ tr:last-child td { border-bottom: 0; }
   function accept(text) {
     if (!queue.length) return;
     var value = String(text).trim();
+    if (queue[0] === "position" && !POS_RE.test(value)) {
+      scanSay("Scanned \"" + value + "\" is not a valid stock position. " + POS_RULE +
+        (photoMode ? " Take the photo again." : " Scanning again in 1 second."));
+      pauseUntil = Date.now() + 1000;   // wait 1 second, then read the position barcode again
+      lastText = "";
+      return;
+    }
     if (queue[0] !== "position" && !PART_RE.test(value)) {
       scanSay("Scanned \"" + value + "\" is not a valid part number. " + PART_RULE + " Scan the part barcode again.", "err");
       return;
@@ -380,8 +439,8 @@ tr:last-child td { border-bottom: 0; }
     if (!getQr()) { say("The scanner did not load. Type the codes instead, or reload the page.", "err"); return; }
     queue = targets.slice();
     scanSay("");
-    (targets[0] === "find" ? $("find-field") : $("scan-both")).after($("scanpanel"));
     $("scanpanel").hidden = false;
+    try { window.scrollTo(0, 0); $("scanpanel").scrollIntoView({ block: "start" }); } catch (e) {}
     prompt_();
     if (photoMode) return;
     try {
@@ -389,6 +448,7 @@ tr:last-child td { border-bottom: 0; }
         { fps: 10, qrbox: function (w, h) { return { width: Math.floor(w * 0.85), height: Math.floor(h * 0.55) }; } },
         function (text) {
           var now = Date.now();
+          if (now < pauseUntil) return;
           if (text === lastText && now - lastAt < 2500) return;   // same label still in view
           lastText = text; lastAt = now;
           accept(text);
@@ -415,7 +475,7 @@ tr:last-child td { border-bottom: 0; }
   });
 
   /* ---------- wiring ---------- */
-  $("scan-both").addEventListener("click", function () { startScan(["position", "part"]); });
+  $("scan-both").addEventListener("click", function () { startScan(["part", "position"]); });
   $("scan-position").addEventListener("click", function () { startScan(["position"]); });
   $("scan-part").addEventListener("click", function () { startScan(["part"]); });
   $("scan-find").addEventListener("click", function () { startScan(["find"]); });
@@ -423,8 +483,20 @@ tr:last-child td { border-bottom: 0; }
   $("btn-load").addEventListener("click", function () { act("load"); });
   $("btn-unload").addEventListener("click", function () { act("unload"); });
   $("export").addEventListener("click", exportExcel);
+  $("edit-toggle").addEventListener("click", function () {
+    if (editMode) { setEdit(false); return; }
+    $("pw-box").hidden = !$("pw-box").hidden;
+    editSay("");
+    if (!$("pw-box").hidden) $("pw").focus();
+  });
+  $("pw-ok").addEventListener("click", tryPassword);
+  $("pw").addEventListener("keydown", function (e) { if (e.key === "Enter") tryPassword(); });
+  $("list").addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("button[data-del]") : null;
+    if (b && editMode) deleteFromList(b.getAttribute("data-del"));
+  });
   $("part").addEventListener("input", function () { clean(this); updateButtons(); });
-  $("position").addEventListener("input", updateButtons);
+  $("position").addEventListener("input", function () { cleanPos(this); updateButtons(); });
   $("find").addEventListener("input", function () { clean(this); renderFind(); });
 
   if (window.claude && typeof window.claude.use === "function") {
