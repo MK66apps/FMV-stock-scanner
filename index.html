@@ -365,24 +365,45 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     var type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     var blob = new Blob([XLSX.write(wb, { bookType: "xlsx", type: "array" })], { type: type });
     var name = "stock-" + new Date().toISOString().slice(0, 10) + ".xlsx";
-    try {
-      if (downloads) {
+    var why = [];
+    function note(step, e) { why.push(step + ": " + ((e && (e.code || e.name || e.message)) || "failed")); }
+    // 1) Claude page: the platform's own save dialog
+    if (downloads) {
+      try {
         await downloads.save({ filename: name, data: blob });
         say("Saved " + name + ". Attach it to an email to send it.", "ok");
         return;
+      } catch (e) {
+        if (e && e.code === "declined") return;
+        note("save", e);
       }
+    }
+    // 2) Phone share sheet (email, messaging, files)
+    try {
       var file = new File([blob], name, { type: type });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: "Stock list" });
+        say("");
         return;
       }
-      var a = document.createElement("a");
-      a.href = URL.createObjectURL(blob); a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-      say("Saved " + name + ". Attach it to an email to send it.", "ok");
     } catch (e) {
-      if (e && (e.code === "declined" || e.name === "AbortError")) return;
-      say("The file could not be saved here.", "err");
+      if (e && e.name === "AbortError") return;   // the user closed the share sheet
+      note("share", e);
+    }
+    // 3) Ordinary browser download
+    if (window.claude) {   // inside the Claude page a plain download does nothing, so report instead
+      say("The file could not be saved here (" + (why.join("; ") || "saving is not available in this view") + ").", "err");
+      return;
+    }
+    try {
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = name; a.rel = "noopener";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { try { URL.revokeObjectURL(a.href); } catch (e) {} }, 60000);
+      say("Downloaded " + name + ". Find it in the phone's Downloads folder and attach it to an email.", "ok");
+    } catch (e) {
+      note("download", e);
+      say("The file could not be saved here (" + why.join("; ") + ").", "err");
     }
   }
 
