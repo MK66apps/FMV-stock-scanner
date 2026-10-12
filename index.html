@@ -74,6 +74,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); ou
 .scanpanel { display: flex; flex-direction: column; gap: 8px; border: 1.5px dashed var(--ink); border-radius: 4px; padding: 12px; }
 .scanprompt { font-weight: 600; margin: 0; }
 #reader { width: 100%; border-radius: 4px; overflow: hidden; }
+#api { font-size: 14px; }
 .readerwrap { overflow: hidden; border-radius: 4px; }
 #reader video { display: block; width: 100%; }
 .msg { margin: 0; padding: 10px 12px; border-radius: 4px; font-weight: 500; border-left: 5px solid var(--muted); background: var(--surface); }
@@ -162,6 +163,15 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
       </div>
     </div>
     <p class="msg" id="edit-msg" role="status" aria-live="polite" hidden></p>
+    <div class="field" id="share-box" hidden>
+      <label class="lbl" for="api">Shared list address (Google Sheet web app)</label>
+      <input type="text" id="api" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="actions">
+        <button type="button" class="primary" id="api-save">Use shared list</button>
+        <button type="button" id="api-clear">Use this phone only</button>
+      </div>
+      <button type="button" id="api-upload" hidden>Copy this phone's records to the shared list</button>
+    </div>
   </section>
 </div>
 
@@ -219,8 +229,46 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
       say("The shared stock list stopped updating. Reload the page.", "err");
     });
   }
+  /* ---------- shared list in a Google Sheet ---------- */
+  var API_STORE = "stock-scanner-api";
+  var api = "", lastSync = 0, syncFailed = false, refreshing = false;
+  function getApi() { try { return localStorage.getItem(API_STORE) || ""; } catch (e) { return ""; } }
+  function setApi(u) { try { if (u) localStorage.setItem(API_STORE, u); else localStorage.removeItem(API_STORE); } catch (e) {} }
+  function validApi(u) { return /^https:\/\/script\.google\.com\/.+\/exec$/.test(u); }
+  async function apiCall(body) {
+    var res = body
+      ? await fetch(api, { method: "POST", body: JSON.stringify(body) })   // plain text body: no extra permission request
+      : await fetch(api + "?t=" + Date.now());
+    var j = await res.json();
+    if (!j || !j.ok) throw new Error((j && j.error) || "error");
+    return j;
+  }
+  function takeRows(list) {
+    rows = (list || []).map(function (r) {
+      return { id: String(r.id), part: String(r.part), position: String(r.position), ts: Number(r.ts) || 0 };
+    });
+    lastSync = Date.now(); syncFailed = false;
+  }
+  async function refresh() {
+    if (refreshing || busy) return;
+    refreshing = true;
+    try {
+      takeRows((await apiCall(null)).rows);
+      if (mode === "pending") mode = "sheet";
+    } catch (e) {
+      syncFailed = true;
+      if (mode === "pending") say("The shared list cannot be reached. Check the internet connection; the app retries every 30 seconds.", "err");
+    } finally { refreshing = false; render(); }
+  }
+  function useSheet() {
+    refresh();
+    setInterval(function () { if (!document.hidden) refresh(); }, 30000);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
+  }
+
   async function addRow(part, position) {
     var row = { part: part, position: position, ts: Date.now() };
+    if (mode === "sheet") { takeRows((await apiCall({ action: "add", part: part, position: position })).rows); render(); return; }
     if (mode === "db") { await col.add(row); return; }
     row.id = "r" + row.ts + Math.random().toString(36).slice(2, 8);
     rows.push(row);
@@ -228,6 +276,12 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     render();
   }
   async function removeRow(row) {
+    if (mode === "sheet") {
+      var j = await apiCall({ action: "delete", id: row.id });
+      takeRows(j.rows); render();
+      if (!j.deleted) throw { code: "gone" };
+      return;
+    }
     if (mode === "db") { await col.doc(row.id).delete(); return; }
     var before = rows;
     rows = rows.filter(function (r) { return r.id !== row.id; });
@@ -258,6 +312,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
         await addRow(part, position);
         say("Loaded " + part + " to " + position + ".", "ok");
       } else {
+        if (mode === "sheet") { refreshing = false; busy = false; await refresh(); busy = true; }   // work on the newest list
         var match = rows.filter(function (r) { return norm(r.part) === norm(part) && norm(r.position) === norm(position); })
           .sort(function (a, b) { return b.ts - a.ts; })[0];
         if (!match) {
@@ -271,7 +326,11 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
       }
       $("part").value = ""; $("position").value = "";
     } catch (e) {
-      say(e && e.code === "invalid_argument"
+      say(e && e.code === "gone"
+        ? "Someone else removed this record a moment ago. The list is updated."
+        : mode === "sheet"
+        ? "The change was not saved because the shared list could not be reached. Check the connection and try again."
+        : e && e.code === "invalid_argument"
         ? "You can view this stock list but not change it. Ask the owner for Contributor access."
         : "The change was not saved. Try again.", "err");
     } finally {
@@ -298,7 +357,10 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
   }
   function render() {
     var n = rows.length;
-    $("count").textContent = n + (n === 1 ? " row" : " rows") + (mode === "local" ? " · this device" : "");
+    var two = function (x) { return (x < 10 ? "0" : "") + x; }, t = new Date(lastSync);
+    $("count").textContent = mode === "pending" ? (api ? "connecting to shared list…" : "loading…") :
+      n + (n === 1 ? " row" : " rows") + (mode === "local" ? " · this device" : "") +
+      (mode === "sheet" ? (syncFailed ? " · shared list offline" : " · shared · " + two(t.getHours()) + ":" + two(t.getMinutes())) : "");
     var list = $("list");
     if (!n) {
       list.innerHTML = '<p class="empty">No parts in stock yet. Scan a position and a part number, then tap Load to stock.</p>';
@@ -330,6 +392,9 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     $("edit-toggle").textContent = on ? "Close editing" : "Edit records";
     $("pw-box").hidden = true; $("pw").value = "";
     editSay(on ? "Editing is open. Tap Delete on a row, then Confirm delete." : "");
+    var hosted = !(window.claude && typeof window.claude.use === "function");
+    $("share-box").hidden = !(on && hosted);
+    if (on && hosted) { $("api").value = api; $("api-upload").hidden = !(mode === "sheet" && loadLocal().length); }
     render();
   }
   function tryPassword() {
@@ -346,7 +411,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
       await removeRow(row);
       editSay("Deleted " + row.part + " at " + row.position + ".", "ok");
     } catch (e) {
-      editSay("The record was not deleted. Try again.", "err");
+      editSay(e && e.code === "gone" ? "This record was already removed by someone else." : "The record was not deleted. Try again.", "err");
     } finally { busy = false; render(); }
   }
 
@@ -523,6 +588,26 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     if (!$("pw-box").hidden) $("pw").focus();
   });
   $("pw-ok").addEventListener("click", tryPassword);
+  $("api-save").addEventListener("click", function () {
+    var u = $("api").value.trim();
+    if (!validApi(u)) { editSay("This is not a Google web app address. It starts with https://script.google.com/ and ends with /exec.", "err"); return; }
+    setApi(u); location.reload();
+  });
+  $("api-clear").addEventListener("click", function () { setApi(""); location.reload(); });
+  $("api-upload").addEventListener("click", async function () {
+    var local = loadLocal();
+    if (!local.length || busy) return;
+    busy = true; this.disabled = true;
+    try {
+      var j = await apiCall({ action: "add", items: local.map(function (r) { return { part: r.part, position: r.position, ts: r.ts }; }) });
+      try { localStorage.removeItem(LOCAL_KEY); } catch (e) {}
+      takeRows(j.rows);
+      this.hidden = true;
+      editSay("Copied " + j.added + " records from this phone to the shared list.", "ok");
+    } catch (e) {
+      editSay("The records were not copied. Check the connection and try again.", "err");
+    } finally { busy = false; this.disabled = false; render(); }
+  });
   $("pw").addEventListener("keydown", function (e) { if (e.key === "Enter") tryPassword(); });
   $("list").addEventListener("click", function (e) {
     var b = e.target.closest ? e.target.closest("button[data-del]") : null;
@@ -536,7 +621,13 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     window.claude.use("downloads").then(function (d) { downloads = d; }, function () {});
     window.claude.use("db").then(function (db) { if (db) useDb(db); else useLocal(); }, useLocal);
   } else {
-    useLocal();
+    // A link like index.html?api=<address> saves the shared list address on this phone.
+    try {
+      var fromLink = new URLSearchParams(location.search).get("api");
+      if (fromLink && validApi(fromLink)) { setApi(fromLink); history.replaceState(null, "", location.pathname); }
+    } catch (e) {}
+    api = getApi();
+    if (api) useSheet(); else useLocal();
   }
 })();
 </script>
