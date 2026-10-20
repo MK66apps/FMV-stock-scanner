@@ -1,7 +1,7 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0}[hidden]{display:none!important}</style></head><body><title>Stock Lookup</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&family=JetBrains+Mono:wght@500;700&display=swap">
 <style>
-/* Layout: one centred desk-width column: data source bar, a large search field, then the answer. Same identity as Stock Scanner. */
+/* Layout: one centred desk-width column: shared list bar with export and locked settings, a large search field, then the answer. Same identity as Stock Scanner. */
 :root {
   --bg: #e7ecef;
   --surface: #f9fbfc;
@@ -86,6 +86,11 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
 .similar li span { color: var(--muted); overflow-wrap: anywhere; text-align: right; }
 .example { font-family: var(--font-body); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--on-accent); background: var(--accent); border-radius: 3px; padding: 1px 6px; margin-left: 6px; }
+.settings { display: flex; flex-direction: column; gap: 8px; border: 1.5px solid var(--line); border-radius: 4px; padding: 14px 16px; background: var(--surface); }
+.settings .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.settings .row input { flex: 1; min-width: 0; }
+#pw, #api { font-size: 15px; font-weight: 500; letter-spacing: 0; padding: 10px 12px; border-width: 1.5px; }
+.err-text { color: var(--bad); font-weight: 500; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
@@ -97,23 +102,32 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
 
   <div class="source" id="source">
     <div class="source-info">
-      <span class="source-name" id="source-name">No stock list opened</span>
-      <span class="source-meta" id="source-meta">Open the Excel file exported from Stock Scanner, or drop it here.</span>
+      <span class="source-name" id="source-name">Not connected</span>
+      <span class="source-meta" id="source-meta">Connecting to the shared stock list…</span>
     </div>
     <div class="source-actions">
-      <button type="button" id="share">Shared list</button>
-      <button type="button" class="primary" id="open">Open Excel file</button>
-      <input type="file" id="file" accept=".xlsx,.xls,.csv" hidden>
+      <button type="button" class="primary" id="export" disabled>Export Excel file</button>
+      <button type="button" id="settings-btn">Settings</button>
     </div>
   </div>
 
-  <div class="connect" id="connect" hidden>
-    <label for="api">Shared list address (Google Sheet web app)</label>
-    <div class="row">
-      <input type="text" id="api" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" spellcheck="false">
-      <button type="button" class="primary" id="api-save">Connect</button>
+  <div class="settings" id="settings" hidden>
+    <div class="field" id="pw-box">
+      <label for="pw">Password for settings</label>
+      <div class="row">
+        <input type="password" id="pw" inputmode="numeric" maxlength="4" autocomplete="off">
+        <button type="button" class="primary" id="pw-ok">Open</button>
+      </div>
     </div>
-    <p class="hint" id="api-msg">Paste the web app address of the shared Google Sheet. The list then updates every minute.</p>
+    <div class="field" id="api-box" hidden>
+      <label for="api">Shared list address (Google Sheet web app)</label>
+      <div class="row">
+        <input type="text" id="api" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" spellcheck="false">
+        <button type="button" class="primary" id="api-save">Connect</button>
+        <button type="button" id="api-clear">Disconnect</button>
+      </div>
+    </div>
+    <p class="hint" id="settings-msg">Enter the password to change the shared list connection.</p>
   </div>
 
   <div class="search">
@@ -128,60 +142,24 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  var KEY = "stock-lookup-data";
-  var data = null;   // {name, exported, rows:[{part, position}], example}
+  var PASSWORD = "1966";
+  var data = null;   // {updated, failedAt?, rows:[{part, position, ts}]}
 
   function esc(s) { var d = document.createElement("span"); d.textContent = s; return d.innerHTML; }
   function norm(s) { return String(s == null ? "" : s).trim().toUpperCase(); }
   // Comparison key: letters and digits only, so spaces, hyphens, dots and invisible characters don't block a match.
   function key(s) { return String(s == null ? "" : s).toUpperCase().replace(/[^A-Z0-9]/g, ""); }
-  // All-digit part numbers also match without leading zeros (Excel drops them when it stores the cell as a number).
+  // All-digit part numbers also match without leading zeros.
   function same(a, b) {
     if (a === b) return true;
     return /^[0-9]+$/.test(a) && /^[0-9]+$/.test(b) && a.replace(/^0+/, "") === b.replace(/^0+/, "");
   }
-  function cellText(v) {
-    if (typeof v === "number") {
-      return Number.isInteger(v) ? v.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 0 }) : String(v);
-    }
-    return String(v == null ? "" : v);
-  }
+  function two(x) { return (x < 10 ? "0" : "") + x; }
+  function hm(t) { var d = new Date(t); return two(d.getHours()) + ":" + two(d.getMinutes()) + ":" + two(d.getSeconds()); }
+  function stamp(t) { var d = new Date(t); return two(d.getDate()) + "." + two(d.getMonth() + 1) + "." + d.getFullYear() + " " + hm(t); }
 
-  /* ---------- loading the exported file ---------- */
-  function parseSheet(aoa) {
-    var rows = [], exported = "";
-    aoa.forEach(function (r, i) {
-      var a = cellText(r[0]).trim(), b = cellText(r[1]).trim();
-      if (!a && !b) return;
-      if (key(a) === "PARTNUMBER") return;                       // header row
-      if (key(a) === "EXPORTED") { exported = b; return; }       // last row: export date and time
-      if (a && b) rows.push({ part: a, position: b });
-    });
-    return { rows: rows, exported: exported };
-  }
-  function openFile(file) {
-    if (!file) return;
-    if (!window.XLSX) { showError("The Excel reader did not load. Check the internet connection and reload the page."); return; }
-    var fr = new FileReader();
-    fr.onload = function () {
-      try {
-        var wb = XLSX.read(new Uint8Array(fr.result), { type: "array" });
-        var parsed = { rows: [], exported: "" };
-        for (var i = 0; i < wb.SheetNames.length && !parsed.rows.length; i++) {   // first sheet that has rows
-          parsed = parseSheet(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[i]], { header: 1, raw: true, defval: "" }));
-        }
-        if (!parsed.rows.length) { showError(file.name + " has no part numbers in columns A and B."); return; }
-        clearInterval(timer);   // a file replaces the live shared list until Shared list is clicked again
-        data = { name: file.name, exported: parsed.exported, rows: parsed.rows, example: false };
-        try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {}
-        renderSource(); search(); $("q").focus();
-      } catch (e) {
-        showError(file.name + " could not be read. Open the .xlsx file exported from Stock Scanner.");
-      }
-    };
-    fr.onerror = function () { showError(file.name + " could not be opened."); };
-    fr.readAsArrayBuffer(file);
-  }
+  try { localStorage.removeItem("stock-lookup-data"); } catch (e) {}   // old remembered Excel list, no longer used
+
   /* ---------- shared list (Google Sheet web app) ---------- */
   var API_STORE = "stock-lookup-api", api = "", timer = null;
   function getApi() { try { return localStorage.getItem(API_STORE) || ""; } catch (e) { return ""; } }
@@ -191,48 +169,83 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
     try {
       var j = await (await fetch(api + "?t=" + Date.now())).json();
       if (!j || !j.ok) throw new Error("error");
-      data = { name: "Shared list", shared: true, updated: Date.now(), rows: (j.rows || []).map(function (r) {
-        return { part: String(r.part), position: String(r.position) }; }) };
-      $("connect").hidden = true;
+      data = { updated: Date.now(), rows: (j.rows || []).map(function (r) {
+        return { part: String(r.part), position: String(r.position), ts: Number(r.ts) || 0 }; }) };
     } catch (e) {
-      if (data && data.shared) data.failedAt = Date.now();
-      else { showError("The shared list could not be reached. Check the address and the internet connection."); return; }
+      if (data) data.failedAt = Date.now();
+      else { data = null; showError("The shared list could not be reached. Check the internet connection, or the address in Settings."); }
     }
     renderSource(); search();
   }
   function connectShared() {
     clearInterval(timer);
+    data = null;
+    if (!api) { renderSource(); search(); return; }
     loadShared();
     timer = setInterval(function () { if (!document.hidden) loadShared(); }, 60000);
   }
 
-  function loadExample() {
-    data = { name: "Example data", exported: "", example: true, rows: [
-      { part: "AB12345XYZ", position: "12A34B" }, { part: "AB12345XYZ", position: "12A34B" },
-      { part: "AB12345XYZ", position: "07C02A" }, { part: "AB12399", position: "03B11C" },
-      { part: "7731004", position: "15D08A" }, { part: "KX900L2", position: "01A01A" } ] };
-    renderSource(); search(); $("q").focus();
+  /* ---------- settings (password) ---------- */
+  function settingsMsg(text, bad) { var m = $("settings-msg"); m.textContent = text; m.className = bad ? "hint err-text" : "hint"; }
+  function openSettings(open) {
+    $("settings").hidden = !open;
+    $("pw-box").hidden = false; $("api-box").hidden = true; $("pw").value = "";
+    $("settings-btn").textContent = open ? "Close settings" : "Settings";
+    settingsMsg("Enter the password to change the shared list connection.");
+    if (open) $("pw").focus();
+  }
+  function tryPassword() {
+    if ($("pw").value !== PASSWORD) { $("pw").value = ""; settingsMsg("Wrong password.", true); return; }
+    $("pw-box").hidden = true; $("api-box").hidden = false; $("api").value = api; $("api").focus();
+    settingsMsg("Paste the web app address of the shared Google Sheet and click Connect. The list then updates every minute.");
+  }
+
+  /* ---------- Excel export ---------- */
+  function exportExcel() {
+    if (!data || !data.rows.length) return;
+    if (!window.XLSX) { showError("The Excel library did not load. Check the internet connection and reload the page."); return; }
+    var now = Date.now();
+    var aoa = [["Part number", "Position", "Loaded at"]].concat(
+      data.rows.slice().sort(function (a, b) { return a.ts - b.ts; })
+        .map(function (r) { return [r.part, r.position, r.ts ? stamp(r.ts) : ""]; }));
+    aoa.push(["Exported", stamp(now)]);
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 20 }, { wch: 12 }, { wch: 22 }];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Stock");
+    var blob = new Blob([XLSX.write(wb, { bookType: "xlsx", type: "array" })],
+      { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    var d = new Date(now);
+    var name = "stock-" + d.getFullYear() + "-" + two(d.getMonth() + 1) + "-" + two(d.getDate()) + "-" + two(d.getHours()) + two(d.getMinutes()) + ".xlsx";
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 60000);
+    $("source-meta").textContent = "Saved " + name + " to the Downloads folder.";
+    setTimeout(renderSource, 6000);
   }
 
   /* ---------- rendering ---------- */
-  function hm(t) { var d = new Date(t), two = function (x) { return (x < 10 ? "0" : "") + x; }; return two(d.getHours()) + ":" + two(d.getMinutes()) + ":" + two(d.getSeconds()); }
   function renderSource() {
-    if (!data) return;
-    $("source-name").innerHTML = esc(data.name) + (data.example ? '<span class="example">Example</span>' : "") + (data.shared ? '<span class="live">Live</span>' : "");
-    $("source-meta").textContent = data.shared
-      ? (data.failedAt ? "Could not reach the shared list at " + hm(data.failedAt) + ". Showing the list from " + hm(data.updated) + ". Retrying every minute."
-                       : "Updated " + hm(data.updated) + ". Refreshes every minute.")
-      : data.example
-      ? "Sample rows to try the search. Open your exported Excel file to use real stock."
-      : (data.exported ? "Exported " + data.exported : "Export time not in file") + ". Open a newer export to refresh.";
+    $("export").disabled = !(data && data.rows.length);
+    if (!api) {
+      $("source-name").textContent = "Not connected";
+      $("source-meta").textContent = "Open Settings (password needed) and enter the shared list address.";
+      $("count").textContent = "";
+      return;
+    }
+    $("source-name").innerHTML = 'Shared list<span class="live">Live</span>';
+    if (!data) { $("source-meta").textContent = "Connecting to the shared stock list…"; $("count").textContent = ""; return; }
+    $("source-meta").textContent = data.failedAt
+      ? "Could not reach the shared list at " + hm(data.failedAt) + ". Showing the list from " + hm(data.updated) + ". Retrying every minute."
+      : "Updated " + hm(data.updated) + ". Refreshes every minute.";
     $("count").textContent = data.rows.length + (data.rows.length === 1 ? " row" : " rows");
   }
   function showError(text) { $("result").innerHTML = '<p class="miss">' + esc(text) + "</p>"; }
   function search() {
     var out = $("result"), q = key($("q").value);
     if (!data) {
-      out.innerHTML = '<p class="hint">Open the Excel file exported from Stock Scanner, then type a part number to see its stock position. ' +
-        'No file at hand? <button type="button" class="link" id="try">Try example data</button></p>';
+      if (!api) out.innerHTML = '<p class="hint">The page is not connected to the shared stock list yet.</p>';
       return;
     }
     if (!q) { out.innerHTML = '<p class="hint">Type a part number. Results appear as you type.</p>'; return; }
@@ -256,7 +269,7 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
         return '<span class="tag">' + esc(exact[k].position) + (exact[k].n > 1 ? "<small>× " + exact[k].n + "</small>" : "") + "</span>";
       }).join("") + "</div>";
     } else {
-      html += '<p class="miss">' + esc(q) + " is not in this stock list.</p>";
+      html += '<p class="miss">' + esc(q) + " is not in the stock list.</p>";
     }
     var sim = Object.keys(similar).sort().slice(0, 10);
     if (sim.length) {
@@ -270,19 +283,16 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
   }
 
   /* ---------- wiring ---------- */
-  $("open").addEventListener("click", function () { $("file").click(); });
-  $("share").addEventListener("click", function () {
-    if (api && !(data && data.shared)) { connectShared(); return; }
-    $("connect").hidden = !$("connect").hidden;
-    $("api").value = api;
-    if (!$("connect").hidden) $("api").focus();
-  });
+  $("export").addEventListener("click", exportExcel);
+  $("settings-btn").addEventListener("click", function () { openSettings($("settings").hidden); });
+  $("pw-ok").addEventListener("click", tryPassword);
+  $("pw").addEventListener("keydown", function (e) { if (e.key === "Enter") tryPassword(); });
   $("api-save").addEventListener("click", function () {
     var u = $("api").value.trim();
-    if (!validApi(u)) { $("api-msg").textContent = "This is not a Google web app address. It starts with https://script.google.com/ and ends with /exec."; return; }
-    api = u; setApi(u); connectShared();
+    if (!validApi(u)) { settingsMsg("This is not a Google web app address. It starts with https://script.google.com/ and ends with /exec.", true); return; }
+    api = u; setApi(u); openSettings(false); connectShared();
   });
-  $("file").addEventListener("change", function () { openFile(this.files && this.files[0]); this.value = ""; });
+  $("api-clear").addEventListener("click", function () { api = ""; setApi(""); clearInterval(timer); openSettings(false); connectShared(); });
   $("q").addEventListener("input", function () {
     var v = this.value.replace(/[^A-Za-z0-9]/g, "").slice(0, 15);
     if (v !== this.value) this.value = v;
@@ -290,31 +300,11 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
   });
   $("result").addEventListener("click", function (e) {
     var t = e.target;
-    if (t.id === "try") { loadExample(); return; }
     if (t.getAttribute && t.getAttribute("data-part")) { $("q").value = t.getAttribute("data-part"); search(); $("q").focus(); }
   });
-  var src = $("source");
-  ["dragenter", "dragover"].forEach(function (ev) {
-    src.addEventListener(ev, function (e) { e.preventDefault(); src.classList.add("drag"); });
-  });
-  ["dragleave", "drop"].forEach(function (ev) {
-    src.addEventListener(ev, function (e) { e.preventDefault(); src.classList.remove("drag"); });
-  });
-  src.addEventListener("drop", function (e) { openFile(e.dataTransfer && e.dataTransfer.files[0]); });
 
-  try { var saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved && saved.rows && saved.rows.length) data = saved; } catch (e) {}
-  if (window.claude && typeof window.claude.use === "function") {
-    $("share").hidden = true;   // inside Claude the page cannot reach other websites
-  } else {
-    try {   // a link like stock-lookup.html?api=<address> saves the shared list address on this PC
-      var fromLink = new URLSearchParams(location.search).get("api");
-      if (fromLink && validApi(fromLink)) { setApi(fromLink); history.replaceState(null, "", location.pathname); }
-    } catch (e) {}
-    api = getApi();
-    if (api) connectShared();
-  }
-  renderSource();
-  search();
+  if (!(window.claude && typeof window.claude.use === "function")) api = getApi();   // inside Claude the page cannot reach Google
+  connectShared();
   $("q").focus();
 })();
 </script>
