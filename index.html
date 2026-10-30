@@ -309,6 +309,12 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     busy = true; updateButtons();
     try {
       if (kind === "load") {
+        if (mode === "sheet") { refreshing = false; busy = false; await refresh(); busy = true; }   // check against the newest list
+        var exists = rows.some(function (r) { return norm(r.part) === norm(part) && norm(r.position) === norm(position); });
+        if (exists) {
+          say("Item existing at selected position in list. " + part + " at " + position + " was not saved again.", "err");
+          return;
+        }
         await addRow(part, position);
         say("Loaded " + part + " to " + position + ".", "ok");
       } else {
