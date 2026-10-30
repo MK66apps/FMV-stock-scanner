@@ -91,48 +91,52 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
 .settings .row input { flex: 1; min-width: 0; }
 #pw, #api { font-size: 15px; font-weight: 500; letter-spacing: 0; padding: 10px 12px; border-width: 1.5px; }
 .err-text { color: var(--bad); font-weight: 500; }
+.headend { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lang { display: inline-flex; border: 1.5px solid var(--ink); border-radius: 4px; overflow: hidden; }
+.lang button { min-height: 30px; padding: 2px 10px; font-size: 15px; border: 0; border-radius: 0; background: var(--surface); color: var(--ink); }
+.lang button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
 <div class="app">
   <header>
-    <h1>Stock Lookup</h1>
-    <span class="source-meta" id="count"></span>
+    <h1 data-i18n="Stock Lookup">Stock Lookup</h1>
+    <div class="headend"><span class="source-meta" id="count"></span><div class="lang" role="group" aria-label="Language"><button type="button" data-lang="en">EN</button><button type="button" data-lang="cs">CZ</button></div></div>
   </header>
 
   <div class="source" id="source">
     <div class="source-info">
-      <span class="source-name" id="source-name">Not connected</span>
-      <span class="source-meta" id="source-meta">Connecting to the shared stock list…</span>
+      <span class="source-name" id="source-name" data-i18n="Not connected">Not connected</span>
+      <span class="source-meta" id="source-meta" data-i18n="Connecting to the shared stock list…">Connecting to the shared stock list…</span>
     </div>
     <div class="source-actions">
-      <button type="button" class="primary" id="export" disabled>Export Excel file</button>
-      <button type="button" id="settings-btn">Settings</button>
+      <button type="button" class="primary" id="export" disabled data-i18n="Export Excel file">Export Excel file</button>
+      <button type="button" id="settings-btn" data-i18n="Settings">Settings</button>
     </div>
   </div>
 
   <div class="settings" id="settings" hidden>
     <div class="field" id="pw-box">
-      <label for="pw">Password for settings</label>
+      <label for="pw" data-i18n="Password for settings">Password for settings</label>
       <div class="row">
         <input type="password" id="pw" inputmode="numeric" maxlength="4" autocomplete="off">
-        <button type="button" class="primary" id="pw-ok">Open</button>
+        <button type="button" class="primary" id="pw-ok" data-i18n="Open">Open</button>
       </div>
     </div>
     <div class="field" id="api-box" hidden>
-      <label for="api">Shared list address (Google Sheet web app)</label>
+      <label for="api" data-i18n="Shared list address (Google Sheet web app)">Shared list address (Google Sheet web app)</label>
       <div class="row">
         <input type="text" id="api" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" spellcheck="false">
-        <button type="button" class="primary" id="api-save">Connect</button>
-        <button type="button" id="api-clear">Disconnect</button>
+        <button type="button" class="primary" id="api-save" data-i18n="Connect">Connect</button>
+        <button type="button" id="api-clear" data-i18n="Disconnect">Disconnect</button>
       </div>
     </div>
-    <p class="hint" id="settings-msg">Enter the password to change the shared list connection.</p>
+    <p class="hint" id="settings-msg" data-i18n="Enter the password to change the shared list connection.">Enter the password to change the shared list connection.</p>
   </div>
 
   <div class="search">
-    <label for="q">Part number</label>
-    <input type="text" id="q" maxlength="15" placeholder="Type a part number" autocomplete="off" spellcheck="false">
+    <label for="q" data-i18n="Part number">Part number</label>
+    <input type="text" id="q" maxlength="15" placeholder="Type a part number" data-i18n-ph="Type a part number" autocomplete="off" spellcheck="false">
   </div>
 
   <div class="result" id="result" aria-live="polite"></div>
@@ -142,6 +146,58 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
+
+  /* ---------- language (EN / CZ) ---------- */
+  var LANG = (function () { try { return localStorage.getItem("stock-lang") === "cs" ? "cs" : "en"; } catch (e) { return "en"; } })();
+  var CS = {
+      "Stock Lookup": "Vyhledání ve skladu",
+      "Not connected": "Nepřipojeno",
+      "Connecting to the shared stock list…": "Připojování ke sdílenému seznamu skladu…",
+      "Export Excel file": "Exportovat do Excelu",
+      "Settings": "Nastavení",
+      "Close settings": "Zavřít nastavení",
+      "Password for settings": "Heslo pro nastavení",
+      "Open": "Otevřít",
+      "Shared list address (Google Sheet web app)": "Adresa sdíleného seznamu (webová aplikace Google Sheet)",
+      "Connect": "Připojit",
+      "Disconnect": "Odpojit",
+      "Enter the password to change the shared list connection.": "Zadejte heslo pro změnu připojení ke sdílenému seznamu.",
+      "Part number": "Číslo dílu",
+      "Type a part number": "Zadejte číslo dílu",
+      "The shared list could not be reached. Check the internet connection, or the address in Settings.": "Sdílený seznam není dostupný. Zkontrolujte připojení k internetu nebo adresu v Nastavení.",
+      "Wrong password.": "Špatné heslo.",
+      "Paste the web app address of the shared Google Sheet and click Connect. The list then updates every minute.": "Vložte adresu webové aplikace sdílené tabulky Google a klikněte na Připojit. Seznam se pak aktualizuje každou minutu.",
+      "The Excel library did not load. Check the internet connection and reload the page.": "Knihovna pro Excel se nenačetla. Zkontrolujte připojení k internetu a načtěte stránku znovu.",
+      "Saved {0} to the Downloads folder.": "Uloženo do složky Stažené soubory: {0}.",
+      "Open Settings (password needed) and enter the shared list address.": "Otevřete Nastavení (je potřeba heslo) a zadejte adresu sdíleného seznamu.",
+      "Shared list": "Sdílený seznam",
+      "Live": "Živě",
+      "Could not reach the shared list at {0}. Showing the list from {1}. Retrying every minute.": "Sdílený seznam nebyl v {0} dostupný. Zobrazen seznam z {1}. Nový pokus každou minutu.",
+      "Updated {0}. Refreshes every minute.": "Aktualizováno {0}. Obnovuje se každou minutu.",
+      "The page is not connected to the shared stock list yet.": "Stránka zatím není připojena ke sdílenému seznamu skladu.",
+      "Type a part number. Results appear as you type.": "Zadejte číslo dílu. Výsledky se zobrazují během psaní.",
+      "{0} is stored at 1 position{1}:": "{0} je uložen na 1 pozici{1}:",
+      "{0} is stored at {2} positions{1}:": "{0} je uložen na {2} pozicích{1}:",
+      " ({0} pieces)": " ({0} ks)",
+      "{0} is not in the stock list.": "{0} není v seznamu skladu.",
+      "Part numbers containing {0}": "Čísla dílů obsahující {0}",
+      "This is not a Google web app address. It starts with https://script.google.com/ and ends with /exec.": "Toto není adresa webové aplikace Google. Začíná https://script.google.com/ a končí /exec."
+  };
+  // T("Loaded {0} to {1}.", a, b): text in the chosen language; "#" marks a key whose English text is the part before it.
+  function T(s) {
+    var a = arguments, out = (LANG === "cs" && CS[s] != null) ? CS[s] : String(s).split("#")[0];
+    return out.replace(/\{(\d)\}/g, function (m, i) { return a[+i + 1]; });
+  }
+  function rowsWord(n) {   // 1 row / 2 rows; 1 řádek / 2–4 řádky / 5 řádků
+    if (LANG !== "cs") return n + (n === 1 ? " row" : " rows");
+    return n + (n === 1 ? " řádek" : (n >= 2 && n <= 4) ? " řádky" : " řádků");
+  }
+  function applyStatic() {
+    document.documentElement.lang = LANG;
+    document.querySelectorAll("[data-i18n]").forEach(function (el) { el.textContent = T(el.getAttribute("data-i18n")); });
+    document.querySelectorAll("[data-i18n-ph]").forEach(function (el) { el.placeholder = T(el.getAttribute("data-i18n-ph")); });
+    document.querySelectorAll(".lang button").forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-lang") === LANG ? "true" : "false"); });
+  }
   var PASSWORD = "1966";
   var data = null;   // {updated, failedAt?, rows:[{part, position, ts}]}
 
@@ -173,7 +229,7 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
         return { part: String(r.part), position: String(r.position), ts: Number(r.ts) || 0 }; }) };
     } catch (e) {
       if (data) data.failedAt = Date.now();
-      else { data = null; showError("The shared list could not be reached. Check the internet connection, or the address in Settings."); }
+      else { data = null; showError(T("The shared list could not be reached. Check the internet connection, or the address in Settings.")); }
     }
     renderSource(); search();
   }
@@ -190,20 +246,20 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
   function openSettings(open) {
     $("settings").hidden = !open;
     $("pw-box").hidden = false; $("api-box").hidden = true; $("pw").value = "";
-    $("settings-btn").textContent = open ? "Close settings" : "Settings";
-    settingsMsg("Enter the password to change the shared list connection.");
+    $("settings-btn").textContent = open ? T("Close settings") : T("Settings");
+    settingsMsg(T("Enter the password to change the shared list connection."));
     if (open) $("pw").focus();
   }
   function tryPassword() {
-    if ($("pw").value !== PASSWORD) { $("pw").value = ""; settingsMsg("Wrong password.", true); return; }
+    if ($("pw").value !== PASSWORD) { $("pw").value = ""; settingsMsg(T("Wrong password."), true); return; }
     $("pw-box").hidden = true; $("api-box").hidden = false; $("api").value = api; $("api").focus();
-    settingsMsg("Paste the web app address of the shared Google Sheet and click Connect. The list then updates every minute.");
+    settingsMsg(T("Paste the web app address of the shared Google Sheet and click Connect. The list then updates every minute."));
   }
 
   /* ---------- Excel export ---------- */
   function exportExcel() {
     if (!data || !data.rows.length) return;
-    if (!window.XLSX) { showError("The Excel library did not load. Check the internet connection and reload the page."); return; }
+    if (!window.XLSX) { showError(T("The Excel library did not load. Check the internet connection and reload the page.")); return; }
     var now = Date.now();
     var aoa = [["Part number", "Position", "Loaded at"]].concat(
       data.rows.slice().sort(function (a, b) { return a.ts - b.ts; })
@@ -221,7 +277,7 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
     a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 60000);
-    $("source-meta").textContent = "Saved " + name + " to the Downloads folder.";
+    $("source-meta").textContent = T("Saved {0} to the Downloads folder.", name);
     setTimeout(renderSource, 6000);
   }
 
@@ -229,26 +285,26 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
   function renderSource() {
     $("export").disabled = !(data && data.rows.length);
     if (!api) {
-      $("source-name").textContent = "Not connected";
-      $("source-meta").textContent = "Open Settings (password needed) and enter the shared list address.";
+      $("source-name").textContent = T("Not connected");
+      $("source-meta").textContent = T("Open Settings (password needed) and enter the shared list address.");
       $("count").textContent = "";
       return;
     }
-    $("source-name").innerHTML = 'Shared list<span class="live">Live</span>';
-    if (!data) { $("source-meta").textContent = "Connecting to the shared stock list…"; $("count").textContent = ""; return; }
+    $("source-name").innerHTML = esc(T("Shared list")) + '<span class="live">' + esc(T("Live")) + '</span>';
+    if (!data) { $("source-meta").textContent = T("Connecting to the shared stock list…"); $("count").textContent = ""; return; }
     $("source-meta").textContent = data.failedAt
-      ? "Could not reach the shared list at " + hm(data.failedAt) + ". Showing the list from " + hm(data.updated) + ". Retrying every minute."
-      : "Updated " + hm(data.updated) + ". Refreshes every minute.";
-    $("count").textContent = data.rows.length + (data.rows.length === 1 ? " row" : " rows");
+      ? T("Could not reach the shared list at {0}. Showing the list from {1}. Retrying every minute.", hm(data.failedAt), hm(data.updated))
+      : T("Updated {0}. Refreshes every minute.", hm(data.updated));
+    $("count").textContent = rowsWord(data.rows.length);
   }
   function showError(text) { $("result").innerHTML = '<p class="miss">' + esc(text) + "</p>"; }
   function search() {
     var out = $("result"), q = key($("q").value);
     if (!data) {
-      if (!api) out.innerHTML = '<p class="hint">The page is not connected to the shared stock list yet.</p>';
+      if (!api) out.innerHTML = '<p class="hint">' + T("The page is not connected to the shared stock list yet.") + '</p>';
       return;
     }
-    if (!q) { out.innerHTML = '<p class="hint">Type a part number. Results appear as you type.</p>'; return; }
+    if (!q) { out.innerHTML = '<p class="hint">' + T("Type a part number. Results appear as you type.") + '</p>'; return; }
     var exact = {}, order = [], similar = {};
     data.rows.forEach(function (r) {
       var p = key(r.part);
@@ -263,17 +319,17 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
     var html = "";
     if (order.length) {
       var total = order.reduce(function (s, k) { return s + exact[k].n; }, 0);
-      html += '<p class="lead"><b>' + esc(q) + "</b> is stored at " + (order.length === 1 ? "1 position" : order.length + " positions") +
-        (total > order.length ? " (" + total + " pieces)" : "") + ":</p>";
+      var pcs = total > order.length ? T(" ({0} pieces)", total) : "", bq = "<b>" + esc(q) + "</b>";
+      html += '<p class="lead">' + (order.length === 1 ? T("{0} is stored at 1 position{1}:", bq, pcs) : T("{0} is stored at {2} positions{1}:", bq, pcs, order.length)) + "</p>";
       html += '<div class="answer">' + order.map(function (k) {
         return '<span class="tag">' + esc(exact[k].position) + (exact[k].n > 1 ? "<small>× " + exact[k].n + "</small>" : "") + "</span>";
       }).join("") + "</div>";
     } else {
-      html += '<p class="miss">' + esc(q) + " is not in the stock list.</p>";
+      html += '<p class="miss">' + T("{0} is not in the stock list.", esc(q)) + "</p>";
     }
     var sim = Object.keys(similar).sort().slice(0, 10);
     if (sim.length) {
-      html += '<div class="similar"><h2>Part numbers containing ' + esc(q) + "</h2><ul>" + sim.map(function (k) {
+      html += '<div class="similar"><h2>' + T("Part numbers containing {0}", esc(q)) + "</h2><ul>" + sim.map(function (k) {
         var s = similar[k];
         return '<li><button type="button" class="link" data-part="' + esc(s.part) + '">' + esc(s.part) + "</button><span>" +
           esc(s.pos.filter(function (v, i, a) { return a.indexOf(v) === i; }).join(", ")) + "</span></li>";
@@ -289,7 +345,7 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
   $("pw").addEventListener("keydown", function (e) { if (e.key === "Enter") tryPassword(); });
   $("api-save").addEventListener("click", function () {
     var u = $("api").value.trim();
-    if (!validApi(u)) { settingsMsg("This is not a Google web app address. It starts with https://script.google.com/ and ends with /exec.", true); return; }
+    if (!validApi(u)) { settingsMsg(T("This is not a Google web app address. It starts with https://script.google.com/ and ends with /exec."), true); return; }
     api = u; setApi(u); openSettings(false); connectShared();
   });
   $("api-clear").addEventListener("click", function () { api = ""; setApi(""); clearInterval(timer); openSettings(false); connectShared(); });
@@ -302,6 +358,19 @@ input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 500; }
     var t = e.target;
     if (t.getAttribute && t.getAttribute("data-part")) { $("q").value = t.getAttribute("data-part"); search(); $("q").focus(); }
   });
+
+  document.querySelectorAll(".lang button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      LANG = b.getAttribute("data-lang");
+      try { localStorage.setItem("stock-lang", LANG); } catch (e) {}
+      applyStatic();
+      $("settings-btn").textContent = $("settings").hidden ? T("Settings") : T("Close settings");
+      settingsMsg($("api-box").hidden ? T("Enter the password to change the shared list connection.")
+        : T("Paste the web app address of the shared Google Sheet and click Connect. The list then updates every minute."));
+      renderSource(); search();
+    });
+  });
+  applyStatic();
 
   if (!(window.claude && typeof window.claude.use === "function")) api = getApi();   // inside Claude the page cannot reach Google
   connectShared();
