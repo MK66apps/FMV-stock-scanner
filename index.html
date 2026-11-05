@@ -89,9 +89,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); ou
 .similar { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .similar p { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
 .similar ul { list-style: none; margin: 0; padding: 0; border: 1.5px solid var(--line); border-radius: 4px; background: var(--surface); }
-.similar li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-family: var(--font-data); font-size: 14px; }
+.similar li { border-bottom: 1px solid var(--line); }
 .similar li:last-child { border-bottom: 0; }
-.similar li span { color: var(--muted); overflow-wrap: anywhere; text-align: right; }
+.similar button { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 8px 12px;
+  border: 0; border-radius: 0; background: none; color: var(--ink); font-family: var(--font-data); font-size: 14px; font-weight: 700;
+  letter-spacing: 0; text-transform: none; text-align: left; }
+.similar button:focus-visible { outline-offset: -3px; }
+.similar button span { color: var(--muted); font-weight: 500; overflow-wrap: anywhere; text-align: right; }
 .tablewrap { overflow-x: auto; border: 1.5px solid var(--line); border-radius: 4px; background: var(--surface); }
 table { border-collapse: collapse; width: 100%; font-family: var(--font-data); font-size: 14px; }
 th { font-family: var(--font-body); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
@@ -318,7 +322,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     if (a === b) return true;
     return /^[0-9]+$/.test(a) && /^[0-9]+$/.test(b) && a.replace(/^0+/, "") === b.replace(/^0+/, "");
   }
-  function esc(s) { var d = document.createElement("span"); d.textContent = s; return d.innerHTML; }
+  function esc(s) { var d = document.createElement("span"); d.textContent = s; return d.innerHTML.replace(/"/g, "&quot;"); }
 
   function say(text, kind) {
     var m = $("msg");
@@ -503,7 +507,8 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     if (sim.length) {
       html += '<div class="similar"><p>' + T("Part numbers containing {0}", esc(k)) + "</p><ul>" + sim.map(function (p) {
         var s = similar[p];
-        return "<li>" + esc(s.part) + "<span>" + esc(s.pos.filter(function (v, i, a) { return a.indexOf(v) === i; }).join(", ")) + "</span></li>";
+        return '<li><button type="button" data-part="' + esc(s.part) + '">' + esc(s.part) + "<span>" +
+          esc(s.pos.filter(function (v, i, a) { return a.indexOf(v) === i; }).join(", ")) + "</span></button></li>";
       }).join("") + "</ul></div>";
     }
     out.innerHTML = html;
@@ -773,6 +778,13 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
   $("part").addEventListener("input", function () { clean(this); updateButtons(); });
   $("position").addEventListener("input", function () { cleanPos(this); updateButtons(); });
   $("find").addEventListener("input", function () { clean(this); renderFind(); });
+  $("find-result").addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("button[data-part]") : null;
+    if (!b) return;
+    $("find").value = b.getAttribute("data-part");
+    $("find").blur();   // close the keyboard so the position stays in view
+    renderFind();
+  });
 
   document.querySelectorAll(".lang button").forEach(function (b) {
     b.addEventListener("click", function () {
