@@ -84,6 +84,12 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); ou
   background: var(--accent); color: var(--on-accent); border: 1.5px solid var(--on-accent); border-radius: 3px; padding: 4px 10px; }
 .tag small { font-weight: 500; font-size: 13px; }
 .found { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.similar { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.similar p { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+.similar ul { list-style: none; margin: 0; padding: 0; border: 1.5px solid var(--line); border-radius: 4px; background: var(--surface); }
+.similar li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-family: var(--font-data); font-size: 14px; }
+.similar li:last-child { border-bottom: 0; }
+.similar li span { color: var(--muted); overflow-wrap: anywhere; text-align: right; }
 .tablewrap { overflow-x: auto; border: 1.5px solid var(--line); border-radius: 4px; background: var(--surface); }
 table { border-collapse: collapse; width: 100%; font-family: var(--font-data); font-size: 14px; }
 th { font-family: var(--font-body); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
@@ -253,6 +259,11 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
       "The file could not be saved here ({0}).": "Soubor zde nelze uložit ({0}).",
       "saving is not available in this view": "ukládání zde není k dispozici",
       "Downloaded {0}. Find it in the phone's Downloads folder and attach it to an email.": "Staženo: {0}. Najdete ho ve složce Stažené soubory a můžete ho přiložit k e-mailu.",
+      "Take a photo of either barcode.": "Vyfoťte jeden z čárových kódů.",
+      "Point the camera at either barcode.": "Namiřte fotoaparát na jeden z čárových kódů.",
+      "This code is a stock position, not a part number.": "Tento kód je skladová pozice, ne číslo dílu.",
+      "Part numbers containing {0}": "Čísla dílů obsahující {0}",
+      "{0} records stayed on this phone because they are not valid.": "Záznamy, které zůstaly v telefonu, protože nejsou platné: {0}.",
       "Take a photo of the part number barcode.": "Vyfoťte čárový kód čísla dílu.",
       "Take a photo of the stock position barcode.": "Vyfoťte čárový kód skladové pozice.",
       "Point the camera at the part number barcode.": "Namiřte fotoaparát na čárový kód čísla dílu.",
@@ -294,9 +305,17 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
   var PART_RULE = "A part number has 1 to 15 letters and digits, with no spaces or other characters.";
   var POS_RE = /^[0-9]{2}[A-Za-z][0-9]{2}[A-Za-z]$/;
   var POS_RULE = "A stock position has exactly 6 characters: 2 digits, a letter, 2 digits, a letter (for example 12A34B).";
+  var NOT_PART = "This code is a stock position, not a part number.";
+  function validPart(v) { return PART_RE.test(v) && !POS_RE.test(v); }   // a part number never has the form of a position
   function cleanPos(el) { var v = el.value.replace(/[^A-Za-z0-9]/g, "").slice(0, 6); if (v !== el.value) el.value = v; }
   function clean(el) { var v = el.value.replace(/[^A-Za-z0-9]/g, "").slice(0, 15); if (v !== el.value) el.value = v; }
   function norm(s) { return String(s == null ? "" : s).trim().toUpperCase(); }
+  // Comparison key: letters and digits only. All-digit part numbers also match without leading zeros (same rules as Stock Lookup).
+  function key(s) { return String(s == null ? "" : s).toUpperCase().replace(/[^A-Z0-9]/g, ""); }
+  function same(a, b) {
+    if (a === b) return true;
+    return /^[0-9]+$/.test(a) && /^[0-9]+$/.test(b) && a.replace(/^0+/, "") === b.replace(/^0+/, "");
+  }
   function esc(s) { var d = document.createElement("span"); d.textContent = s; return d.innerHTML; }
 
   function say(text, kind) {
@@ -334,7 +353,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
   }
   /* ---------- shared list in a Google Sheet ---------- */
   var API_STORE = "stock-scanner-api";
-  var api = "", lastSync = 0, syncFailed = false, refreshing = false;
+  var api = "", lastSync = 0, syncFailed = false, refreshing = false, listSeq = 0;
   function getApi() { try { return localStorage.getItem(API_STORE) || ""; } catch (e) { return ""; } }
   function setApi(u) { try { if (u) localStorage.setItem(API_STORE, u); else localStorage.removeItem(API_STORE); } catch (e) {} }
   function validApi(u) { return /^https:\/\/script\.google\.com\/.+\/exec$/.test(u); }
@@ -344,7 +363,12 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
       : await fetch(api + "?t=" + Date.now());
     var j = await res.json();
     if (!j || !j.ok) throw new Error((j && j.error) || "error");
+    if (body) listSeq++;   // this answer is newer than any list still on its way
     return j;
+  }
+  async function pull() {
+    var mine = ++listSeq, j = await apiCall(null);
+    if (mine === listSeq) takeRows(j.rows);
   }
   function takeRows(list) {
     rows = (list || []).map(function (r) {
@@ -356,7 +380,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     if (refreshing || busy) return;
     refreshing = true;
     try {
-      takeRows((await apiCall(null)).rows);
+      await pull();
       if (mode === "pending") mode = "sheet";
     } catch (e) {
       syncFailed = true;
@@ -371,12 +395,17 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
 
   async function addRow(part, position) {
     var row = { part: part, position: position, ts: Date.now() };
-    if (mode === "sheet") { takeRows((await apiCall({ action: "add", part: part, position: position })).rows); render(); return; }
-    if (mode === "db") { await col.add(row); return; }
+    if (mode === "sheet") {
+      var j = await apiCall({ action: "add", part: part, position: position });
+      takeRows(j.rows); render();
+      return !!j.duplicates;
+    }
+    if (mode === "db") { await col.add(row); return false; }
     row.id = "r" + row.ts + Math.random().toString(36).slice(2, 8);
     rows.push(row);
     if (!saveLocal()) { rows.pop(); throw new Error("storage"); }
     render();
+    return false;
   }
   async function removeRow(row) {
     if (mode === "sheet") {
@@ -394,9 +423,9 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
 
   /* ---------- actions ---------- */
   function positionsOf(part) {
-    var p = norm(part), map = {}, order = [];
+    var p = key(part), map = {}, order = [];
     rows.forEach(function (r) {
-      if (norm(r.part) !== p) return;
+      if (!same(key(r.part), p)) return;
       var k = norm(r.position);
       if (!map[k]) { map[k] = { position: r.position, n: 0 }; order.push(k); }
       map[k].n++;
@@ -405,24 +434,24 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
   }
 
   async function act(kind) {
-    var part = $("part").value.trim(), position = $("position").value.trim();
+    var part = norm($("part").value), position = norm($("position").value);
     if (!part || !position || busy || mode === "pending") return;
+    if (POS_RE.test(part)) { say(T(NOT_PART), "err"); return; }
     if (!PART_RE.test(part)) { say(T(PART_RULE), "err"); return; }
     if (!POS_RE.test(position)) { say(T(POS_RULE), "err"); return; }
     busy = true; updateButtons();
     try {
       if (kind === "load") {
-        if (mode === "sheet") { refreshing = false; busy = false; await refresh(); busy = true; }   // check against the newest list
-        var exists = rows.some(function (r) { return norm(r.part) === norm(part) && norm(r.position) === norm(position); });
+        var exists = rows.some(function (r) { return norm(r.part) === part && norm(r.position) === position; });
+        if (!exists) exists = await addRow(part, position);   // the shared list checks again on the server
         if (exists) {
           say(T("Item existing at selected position in list. {0} at {1} was not saved again.", part, position), "err");
           return;
         }
-        await addRow(part, position);
         say(T("Loaded {0} to {1}.", part, position), "ok");
       } else {
-        if (mode === "sheet") { refreshing = false; busy = false; await refresh(); busy = true; }   // work on the newest list
-        var match = rows.filter(function (r) { return norm(r.part) === norm(part) && norm(r.position) === norm(position); })
+        if (mode === "sheet") { await pull(); render(); }   // work on the newest list; a failure stops here
+        var match = rows.filter(function (r) { return norm(r.part) === part && norm(r.position) === position; })
           .sort(function (a, b) { return b.ts - a.ts; })[0];
         if (!match) {
           var where = positionsOf(part).map(function (x) { return x.position; });
@@ -458,11 +487,24 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     var q = $("find").value.trim(), out = $("find-result");
     if (!q) { out.innerHTML = '<p class="hint">' + T("Type or scan a part number to see where it is stored.") + '</p>'; return; }
     if (mode === "pending") { out.innerHTML = '<p class="hint">' + T("Loading the stock list…") + '</p>'; return; }
-    var found = positionsOf(q);
-    if (!found.length) { out.innerHTML = '<p class="msg err">' + T("{0} is not in stock.", esc(q)) + "</p>"; return; }
-    out.innerHTML = '<div class="found">' + found.map(function (x) {
-      return '<span class="tag">' + esc(x.position) + (x.n > 1 ? " <small>× " + x.n + "</small>" : "") + "</span>";
-    }).join("") + "</div>";
+    var found = positionsOf(q), k = key(q), similar = {};
+    rows.forEach(function (r) {
+      var p = key(r.part);
+      if (!same(p, k) && p.indexOf(k) !== -1) (similar[p] = similar[p] || { part: r.part, pos: [] }).pos.push(r.position);
+    });
+    var html = found.length
+      ? '<div class="found">' + found.map(function (x) {
+          return '<span class="tag">' + esc(x.position) + (x.n > 1 ? " <small>× " + x.n + "</small>" : "") + "</span>";
+        }).join("") + "</div>"
+      : '<p class="msg err">' + T("{0} is not in stock.", esc(q)) + "</p>";
+    var sim = Object.keys(similar).sort().slice(0, 10);
+    if (sim.length) {
+      html += '<div class="similar"><p>' + T("Part numbers containing {0}", esc(k)) + "</p><ul>" + sim.map(function (p) {
+        var s = similar[p];
+        return "<li>" + esc(s.part) + "<span>" + esc(s.pos.filter(function (v, i, a) { return a.indexOf(v) === i; }).join(", ")) + "</span></li>";
+      }).join("") + "</ul></div>";
+    }
+    out.innerHTML = html;
   }
   function render() {
     var n = rows.length;
@@ -593,28 +635,30 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     return qr;
   }
   function prompt_() {
-    var isPos = queue[0] === "position";
+    var isPos = queue[0] === "position", either = queue.length > 1;
     $("scanprompt").textContent = photoMode
-      ? (isPos ? T("Take a photo of the stock position barcode.") : T("Take a photo of the part number barcode."))
-      : (isPos ? T("Point the camera at the stock position barcode.") : T("Point the camera at the part number barcode."));
+      ? (either ? T("Take a photo of either barcode.") : isPos ? T("Take a photo of the stock position barcode.") : T("Take a photo of the part number barcode."))
+      : (either ? T("Point the camera at either barcode.") : isPos ? T("Point the camera at the stock position barcode.") : T("Point the camera at the part number barcode."));
     $("photo-btn").hidden = !photoMode;
     $("reader").hidden = photoMode;
   }
   function accept(text) {
     if (!queue.length) return;
-    var value = String(text).trim();
-    if (queue[0] === "position" && !POS_RE.test(value)) {
+    var value = norm(text);
+    // The form of the code says which field it belongs to, so the two labels can be scanned in any order.
+    var slot = queue.findIndex(function (t) { return t === "position" ? POS_RE.test(value) : validPart(value); });
+    if (slot < 0 && queue[0] === "position") {
       scanSay(T("Scanned \"{0}\" is not a valid stock position.", value) + " " + T(POS_RULE) +
         (photoMode ? T(" Take the photo again.") : T(" Scanning again in 1 second.")));
       pauseUntil = Date.now() + 1000;   // wait 1 second, then read the position barcode again
       lastText = "";
       return;
     }
-    if (queue[0] !== "position" && !PART_RE.test(value)) {
-      scanSay(T("Scanned \"{0}\" is not a valid part number.", value) + " " + T(PART_RULE) + T(" Scan the part barcode again."));
+    if (slot < 0) {
+      scanSay(T("Scanned \"{0}\" is not a valid part number.", value) + " " + T(POS_RE.test(value) ? NOT_PART : PART_RULE) + T(" Scan the part barcode again."));
       return;
     }
-    var target = queue.shift();
+    var target = queue.splice(slot, 1)[0];
     $(target).value = value;
     scanSay("");
     if (target === "find") renderFind(); else say("");
@@ -710,10 +754,11 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     busy = true; this.disabled = true;
     try {
       var j = await apiCall({ action: "add", items: local.map(function (r) { return { part: r.part, position: r.position, ts: r.ts }; }) });
-      try { localStorage.removeItem(LOCAL_KEY); } catch (e) {}
+      if (!j.invalid) { try { localStorage.removeItem(LOCAL_KEY); } catch (e) {} }
       takeRows(j.rows);
-      this.hidden = true;
-      editSay(T("Copied {0} records from this phone to the shared list.", j.added), "ok");
+      this.hidden = !j.invalid;
+      editSay(T("Copied {0} records from this phone to the shared list.", j.added) +
+        (j.invalid ? " " + T("{0} records stayed on this phone because they are not valid.", j.invalid) : ""), j.invalid ? "err" : "ok");
     } catch (e) {
       editSay(T("The records were not copied. Check the connection and try again."), "err");
     } finally { busy = false; this.disabled = false; render(); }
