@@ -174,7 +174,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     <div class="field" id="pw-box" hidden>
       <label class="lbl" for="pw" data-i18n="Password for editing">Password for editing</label>
       <div class="row">
-        <input type="text" id="pw" inputmode="numeric" maxlength="4" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <input type="text" id="pw" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false">
         <button type="button" class="primary" id="pw-ok" data-i18n="Open">Open</button>
       </div>
     </div>
@@ -191,8 +191,8 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
   </section>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"></script>
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
@@ -257,6 +257,9 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
       "Showing the last 3 of {0} records. The full list is in Edit records.": "Zobrazeny poslední 3 z {0} záznamů. Celý seznam je v Upravit záznamy.",
       "Editing is open. Tap Delete on a row, then Confirm delete.": "Úpravy jsou otevřené. Klepněte u řádku na Smazat a pak na Potvrdit smazání.",
       "Wrong password.": "Špatné heslo.",
+      "Too many wrong attempts. Try again in 15 minutes.": "Příliš mnoho špatných pokusů. Zkuste to znovu za 15 minut.",
+      "No password is set. Add the EDIT_PASSWORD property in Apps Script.": "Heslo není nastavené. Přidejte v Apps Scriptu vlastnost EDIT_PASSWORD.",
+      "The server did not check the password, so the records stay locked. You can only enter a new link.": "Server heslo neověřil, proto záznamy zůstávají zamčené. Můžete jen zadat nový odkaz.",
       "Deleted {0} at {1}.": "Smazáno: {0} na {1}.",
       "This record was already removed by someone else.": "Tento záznam už odstranil někdo jiný.",
       "The record was not deleted. Try again.": "Záznam nebyl smazán. Zkuste to znovu.",
@@ -369,7 +372,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
       : await fetch(api + "?t=" + Date.now());
     var j = await res.json();
     if (!j || !j.ok) throw new Error((j && j.error) || "error");
-    if (body) listSeq++;   // this answer is newer than any list still on its way
+    if (body && body.action !== "unlock") listSeq++;   // this answer is newer than any list still on its way
     return j;
   }
   async function pull() {
@@ -540,8 +543,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
   }
 
   /* ---------- editing mode (password) ---------- */
-  var EDIT_PASSWORD = "1966";
-  var editMode = false, pendingDel = null;
+  var editMode = false, pendingDel = null, unlocking = false;
   function editSay(text, kind) {
     var m = $("edit-msg"); m.textContent = text; m.className = "msg" + (kind ? " " + kind : ""); m.hidden = !text;
   }
@@ -555,10 +557,24 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     if (on && hosted) { $("api").value = api; $("api-upload").hidden = !(mode === "sheet" && loadLocal().length); }
     render();
   }
-  function tryPassword() {
-    if ($("pw").value === EDIT_PASSWORD) { setEdit(true); return; }
-    $("pw").value = "";
-    editSay(T("Wrong password."), "err");
+  // The shared list checks the password. If it cannot answer, a wrong link could never be corrected,
+  // so only a new link can be entered: the saved address stays hidden and the records stay locked.
+  async function tryPassword() {
+    var pw = $("pw").value;
+    if (!pw || unlocking) return;
+    unlocking = true; $("pw-ok").disabled = true;
+    try {
+      var j = await apiCall({ action: "unlock", password: pw });
+      if (j.unlocked) { setEdit(true); return; }
+      $("pw").value = "";
+      editSay(T(j.reason === "locked" ? "Too many wrong attempts. Try again in 15 minutes."
+        : j.reason === "unset" ? "No password is set. Add the EDIT_PASSWORD property in Apps Script."
+        : "Wrong password."), "err");
+    } catch (e) {
+      $("pw").value = ""; $("pw-box").hidden = true;
+      $("api").value = ""; $("api-upload").hidden = true; $("share-box").hidden = false;
+      editSay(T("The server did not check the password, so the records stay locked. You can only enter a new link."), "err");
+    } finally { unlocking = false; $("pw-ok").disabled = false; }
   }
   async function deleteFromList(id) {
     var row = rows.filter(function (r) { return r.id === id; })[0];
@@ -744,6 +760,8 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
   $("export").addEventListener("click", exportExcel);
   $("edit-toggle").addEventListener("click", function () {
     if (editMode) { setEdit(false); return; }
+    if (!api) { setEdit(true); return; }   // not connected: no shared records here and no server to ask
+    $("share-box").hidden = true;
     $("pw-box").hidden = !$("pw-box").hidden;
     editSay("");
     if (!$("pw-box").hidden) $("pw").focus();
