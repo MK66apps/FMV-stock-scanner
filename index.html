@@ -242,7 +242,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
       "Edit": "Úprava",
       "Confirm delete": "Potvrdit smazání",
       "Delete": "Smazat",
-      "Showing the newest 200 of {0} rows. The Excel file contains all of them.": "Zobrazeno nejnovějších 200 z {0} řádků. Soubor Excel obsahuje všechny.",
+      "Showing the last 3 of {0} records. The full list is in Edit records.": "Zobrazeny poslední 3 z {0} záznamů. Celý seznam je v Upravit záznamy.",
       "Editing is open. Tap Delete on a row, then Confirm delete.": "Úpravy jsou otevřené. Klepněte u řádku na Smazat a pak na Potvrdit smazání.",
       "Wrong password.": "Špatné heslo.",
       "Deleted {0} at {1}.": "Smazáno: {0} na {1}.",
@@ -475,7 +475,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
       list.innerHTML = '<p class="empty">' + T("No parts in stock yet. Scan a position and a part number, then tap Load to stock.") + '</p>';
     } else {
       var sorted = rows.slice().sort(function (a, b) { return b.ts - a.ts; });
-      var shown = editMode ? sorted : sorted.slice(0, 200);
+      var shown = editMode ? sorted : sorted.slice(0, 3);   // only the last 3 outside editing mode
       list.innerHTML = "<table><thead><tr><th>" + T("Part number") + "</th><th>" + T("Position") + "</th>" + (editMode ? "<th>" + T("Edit") + "</th>" : "") + "</tr></thead><tbody>" +
         shown.map(function (r) {
           var sure = pendingDel === r.id;
@@ -484,7 +484,7 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
               (sure ? T("Confirm delete") : T("Delete")) + "</button></td>" : "") + "</tr>";
         }).join("") +
         "</tbody></table>" +
-        (n > shown.length ? '<p class="empty">' + T("Showing the newest 200 of {0} rows. The Excel file contains all of them.", n) + "</p>" : "");
+        (n > shown.length ? '<p class="empty">' + T("Showing the last 3 of {0} records. The full list is in Edit records.", n) + "</p>" : "");
     }
     renderFind();
     updateButtons();
