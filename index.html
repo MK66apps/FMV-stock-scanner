@@ -51,7 +51,7 @@ label.lbl { font-size: 13px; font-weight: 600; text-transform: uppercase; letter
 .field { display: flex; flex-direction: column; gap: 4px; }
 .row { display: flex; gap: 8px; }
 .row > input { flex: 1; min-width: 0; }
-input[type="text"], input[type="password"] {
+input[type="text"] {
   font-family: var(--font-data); font-size: 18px; font-weight: 500; color: var(--ink);
   background: var(--surface); border: 1.5px solid var(--line); border-radius: 4px;
   padding: 12px; min-height: 50px; width: 100%;
@@ -75,6 +75,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); ou
 .scanprompt { font-weight: 600; margin: 0; }
 #reader { width: 100%; border-radius: 4px; overflow: hidden; }
 #api { font-size: 14px; }
+/* A real password field would make the phone's password manager take over the Part number to find field above it. */
+#pw { -webkit-text-security: disc; }
 .readerwrap { overflow: hidden; border-radius: 4px; }
 #reader video { display: block; width: 100%; }
 .msg { margin: 0; padding: 10px 12px; border-radius: 4px; font-weight: 500; border-left: 5px solid var(--muted); background: var(--surface); }
@@ -168,16 +170,16 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
     <div class="field" id="pw-box" hidden>
       <label class="lbl" for="pw" data-i18n="Password for editing">Password for editing</label>
       <div class="row">
-        <input type="password" id="pw" inputmode="numeric" maxlength="4" autocomplete="off">
+        <input type="text" id="pw" inputmode="numeric" maxlength="4" autocomplete="off" autocapitalize="off" spellcheck="false">
         <button type="button" class="primary" id="pw-ok" data-i18n="Open">Open</button>
       </div>
     </div>
     <p class="msg" id="edit-msg" role="status" aria-live="polite" hidden></p>
     <div class="field" id="share-box" hidden>
-      <label class="lbl" for="api" data-i18n="Shared list address (Google Sheet web app)">Shared list address (Google Sheet web app)</label>
+      <label class="lbl" for="api" data-i18n="Apps Script link of the stock file">Apps Script link of the stock file</label>
       <input type="text" id="api" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false">
       <div class="actions">
-        <button type="button" class="primary" id="api-save" data-i18n="Use shared list">Use shared list</button>
+        <button type="button" class="primary" id="api-save" data-i18n="Connect file">Connect file</button>
         <button type="button" id="api-clear" data-i18n="Use this phone only">Use this phone only</button>
       </div>
       <button type="button" id="api-upload" hidden data-i18n="Copy this phone's records to the shared list">Copy this phone's records to the shared list</button>
@@ -219,8 +221,8 @@ button.del.sure { background: var(--unload); color: var(--on-action); }
       "Close editing": "Zavřít úpravy",
       "Password for editing": "Heslo pro úpravy",
       "Open": "Otevřít",
-      "Shared list address (Google Sheet web app)": "Adresa sdíleného seznamu (webová aplikace Google Sheet)",
-      "Use shared list": "Použít sdílený seznam",
+      "Apps Script link of the stock file": "Odkaz z Apps Scriptu na soubor skladu",
+      "Connect file": "Připojit soubor",
       "Use this phone only": "Jen tento telefon",
       "Copy this phone's records to the shared list": "Zkopírovat záznamy z tohoto telefonu do sdíleného seznamu",
       "A part number has 1 to 15 letters and digits, with no spaces or other characters.": "Číslo dílu má 1 až 15 písmen a číslic, bez mezer a jiných znaků.",
